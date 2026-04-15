@@ -257,15 +257,21 @@ export const analyzeStock = (history, sentiment = 0) => {
     }
   };
 
+  const isBearish = signal.includes('SELL');
+  const entry = lastPrice;
+  const target = isBearish ? Math.min(pivotData.s1 || entry * 0.95, entry * 0.98) : Math.max(pivotData.r1 || entry * 1.05, entry * 1.02);
+  const sl = isBearish ? Math.max(pivotData.r1 || entry * 1.03, entry * 1.01) : Math.min(pivotData.s1 || entry * 0.97, entry * 0.99);
+
   return {
     symbol: '', 
     signal,
     score,
     currentPrice: lastPrice,
     rsi: currentRSI,
-    buyLevel: pivotData.s1 || lastPrice * 0.98, 
-    sellLevel: pivotData.r1 || lastPrice * 1.02, 
-    stopLoss: pivotData.s2 || lastPrice * 0.95,  
+    buyLevel: entry, 
+    sellLevel: target, 
+    stopLoss: sl,  
+    duration: '2 - 6 Weeks (Swing)',
     reasoning,
     indicators: {
         rsi: currentRSI,

@@ -2,11 +2,11 @@ import React, { useEffect, useRef } from 'react';
 import { createChart, ColorType } from 'lightweight-charts';
 
 const StockChart = ({ data, colors: {
-    backgroundColor = '#ffffff',
-    lineColor = '#4f46e5',
-    textColor = '#64748b',
-    areaTopColor = 'rgba(79, 70, 229, 0.15)',
-    areaBottomColor = 'rgba(79, 70, 229, 0.02)',
+    backgroundColor = 'transparent',
+    lineColor = '#60a5fa',
+    textColor = '#94a3b8',
+    areaTopColor = 'rgba(96, 165, 250, 0.25)',
+    areaBottomColor = 'rgba(96, 165, 250, 0.01)',
 } = {} }) => {
     const chartContainerRef = useRef();
 
@@ -24,19 +24,19 @@ const StockChart = ({ data, colors: {
                 fontFamily: 'Inter, sans-serif',
             },
             grid: {
-                vertLines: { color: '#f1f5f9' },
-                horzLines: { color: '#f1f5f9' },
+                vertLines: { color: 'rgba(255, 255, 255, 0.05)' },
+                horzLines: { color: 'rgba(255, 255, 255, 0.05)' },
             },
             width: chartContainerRef.current.clientWidth,
             height: 350,
             timeScale: {
-                borderColor: '#e2e8f0',
+                borderColor: 'rgba(255, 255, 255, 0.1)',
                 fixRightEdge: true,
                 fixLeftEdge: true,
                 rightOffset: 0,
             },
             rightPriceScale: {
-                borderColor: '#e2e8f0',
+                borderColor: 'rgba(255, 255, 255, 0.1)',
             }
         });
 
@@ -48,12 +48,19 @@ const StockChart = ({ data, colors: {
             priceLineVisible: false,
         });
 
-        // Sort data by time
+        // Sort data by time and filter invalid/duplicate entries
+        const uniqueDates = new Set();
         const sortedData = [...data]
+            .filter(item => item.close != null && !isNaN(item.close))
             .map(item => ({
                 time: item.date.split('T')[0],
                 value: item.close
             }))
+            .filter(item => {
+                if (uniqueDates.has(item.time)) return false;
+                uniqueDates.add(item.time);
+                return true;
+            })
             .sort((a, b) => new Date(a.time) - new Date(b.time));
 
         newSeries.setData(sortedData);

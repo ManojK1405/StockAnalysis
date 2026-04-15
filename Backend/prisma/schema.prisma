@@ -45,15 +45,6 @@ model Stock {
   watchlists    Watchlist[]
   portfolioItems PortfolioItem[]
   
-  // Fundamentals
-  peRatio       Float?
-  marketCap     Float?
-  dividendYield Float?
-  beta          Float?
-  eps           Float?
-  
-  lastPrice     Float?
-  changePercent Float?
   updatedAt     DateTime @updatedAt
 }
 

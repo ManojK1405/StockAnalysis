@@ -19,5 +19,6 @@ export const getPortfolio = () => API.get('/portfolio/portfolio');
 export const addPortfolioItem = (item) => API.post('/portfolio/portfolio', item);
 export const getPrediction = (symbol) => API.get(`/predictions/${symbol}`);
 export const generateStrategy = (params) => API.post('/strategy/generate', params);
+export const getIntradayPulse = (params) => API.post('/strategy/intraday', params);
 
 export default API;

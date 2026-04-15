@@ -143,8 +143,8 @@ const Strategist = () => {
 
   // ── Shared card style
   const card = {
-    background: 'rgba(255,255,255,0.035)',
-    border: '1px solid rgba(255,255,255,0.08)',
+    background: 'rgba(15,23,42,0.92)',
+    border: '1px solid rgba(148,163,184,0.18)',
     borderRadius: 20,
     padding: '28px 32px',
   };
@@ -274,7 +274,7 @@ const Strategist = () => {
                       }}>
                         <Icon size={22} color={active ? r.color : '#475569'} />
                         <p style={{ fontSize: 14, fontWeight: 700, color: active ? r.color : '#94a3b8', marginTop: 10 }}>{r.label}</p>
-                        <p style={{ fontSize: 11, color: '#475569', marginTop: 4, lineHeight: 1.4 }}>{r.desc}</p>
+                        <p style={{ fontSize: 11, color: '#cbd5e1', marginTop: 4, lineHeight: 1.4 }}>{r.desc}</p>
                       </button>
                     );
                   })}
@@ -286,7 +286,7 @@ const Strategist = () => {
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20 }}>
                   <Globe2 color="#6366f1" size={22} />
                   <h2 style={{ fontSize: 20, fontWeight: 700, color: '#f1f5f9' }}>Preferred sector?</h2>
-                  <span style={{ marginLeft: 'auto', fontSize: 12, color: '#475569' }}>Optional</span>
+                  <span style={{ marginLeft: 'auto', fontSize: 12, color: '#cbd5e1' }}>Optional</span>
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: 10 }}>
                   {SECTORS.map(s => {
@@ -294,9 +294,9 @@ const Strategist = () => {
                     return (
                       <button key={s.id} onClick={() => setSector(s.id)} style={{
                         padding: '12px 10px', borderRadius: 12, cursor: 'pointer', textAlign: 'center',
-                        background: active ? 'rgba(99,102,241,0.12)' : 'rgba(255,255,255,0.03)',
-                        border: `1.5px solid ${active ? '#6366f1' : 'rgba(255,255,255,0.08)'}`,
-                        color: active ? '#a5b4fc' : '#64748b', fontSize: 13, fontWeight: 600,
+                        background: active ? 'rgba(99,102,241,0.16)' : 'rgba(255,255,255,0.06)',
+                        border: `1.5px solid ${active ? '#6366f1' : 'rgba(148,163,184,0.18)'}`,
+                        color: active ? '#eef2ff' : '#cbd5e1', fontSize: 13, fontWeight: 600,
                         transition: 'all 0.2s',
                       }}>
                         <div style={{ fontSize: 20, marginBottom: 4 }}>{s.emoji}</div>
@@ -351,7 +351,7 @@ const Strategist = () => {
                       }}>
                         <Icon size={22} color={active ? '#6366f1' : '#475569'} style={{ margin: '0 auto 10px' }} />
                         <p style={{ fontSize: 14, fontWeight: 700, color: active ? '#a5b4fc' : '#94a3b8' }}>{h.label}</p>
-                        <p style={{ fontSize: 12, color: '#475569', marginTop: 4 }}>{h.sub}</p>
+                        <p style={{ fontSize: 12, color: '#cbd5e1', marginTop: 4 }}>{h.sub}</p>
                       </button>
                     );
                   })}
@@ -371,8 +371,8 @@ const Strategist = () => {
                     <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                       <Icon size={16} color="#6366f1" />
                       <div>
-                        <p style={{ fontSize: 11, color: '#475569', fontWeight: 600, textTransform: 'uppercase' }}>{label}</p>
-                        <p style={{ fontSize: 15, fontWeight: 700, color: '#e2e8f0' }}>{val}</p>
+                        <p style={{ fontSize: 11, color: '#cbd5e1', fontWeight: 600, textTransform: 'uppercase' }}>{label}</p>
+                        <p style={{ fontSize: 15, fontWeight: 700, color: '#eff6ff' }}>{val}</p>
                       </div>
                     </div>
                   ))}
@@ -432,10 +432,10 @@ const Strategist = () => {
                     <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1.5, color: '#6366f1' }}>
                       AI-Generated Strategy
                     </span>
-                    <h2 style={{ fontSize: 28, fontWeight: 800, color: '#f1f5f9', marginTop: 6, marginBottom: 10 }}>
+                    <h2 style={{ fontSize: 28, fontWeight: 800, color: '#f8fafc', marginTop: 6, marginBottom: 10 }}>
                       {strategy.strategyTitle}
                     </h2>
-                    <p style={{ color: '#94a3b8', lineHeight: 1.65, maxWidth: 560, fontSize: 15 }}>
+                    <p style={{ color: '#cbd5e1', lineHeight: 1.65, maxWidth: 560, fontSize: 15 }}>
                       {strategy.summary}
                     </p>
                   </div>
@@ -461,7 +461,7 @@ const Strategist = () => {
                       border: '1px solid rgba(255,255,255,0.07)',
                     }}>
                       <Icon size={15} color={color} />
-                      <p style={{ fontSize: 11, color: '#475569', fontWeight: 600, textTransform: 'uppercase', marginTop: 8 }}>{label}</p>
+                      <p style={{ fontSize: 11, color: '#cbd5e1', fontWeight: 600, textTransform: 'uppercase', marginTop: 8 }}>{label}</p>
                       <p style={{ fontSize: 16, fontWeight: 800, color, marginTop: 2 }}>{val}</p>
                     </div>
                   ))}
@@ -549,7 +549,7 @@ const Strategist = () => {
                         </div>
 
                         <div style={{ textAlign: 'right', minWidth: 'max-content' }}>
-                          <p style={{ fontSize: 18, fontWeight: 800, color: '#f1f5f9' }}>{formatINR(item.amount)}</p>
+                          <p style={{ fontSize: 18, fontWeight: 800, color: '#eff6ff' }}>{formatINR(item.amount)}</p>
                           <p style={{ fontSize: 11, color: '#475569', marginTop: 2, textTransform: 'uppercase', fontWeight: 600 }}>to invest</p>
                         </div>
                       </motion.div>
@@ -566,10 +566,10 @@ const Strategist = () => {
                     <Layers color="#6366f1" size={18} />
                     <h3 style={{ fontSize: 16, fontWeight: 700, color: '#f1f5f9' }}>Market Outlook</h3>
                   </div>
-                  <p style={{ fontSize: 14, color: '#94a3b8', lineHeight: 1.65 }}>{strategy.marketOutlook}</p>
+                  <p style={{ fontSize: 14, color: '#cbd5e1', lineHeight: 1.65 }}>{strategy.marketOutlook}</p>
                   <div style={{ marginTop: 16, padding: '12px 16px', borderRadius: 12, background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.18)' }}>
                     <p style={{ fontSize: 12, fontWeight: 700, color: '#6366f1', marginBottom: 4 }}>Rebalance Tip</p>
-                    <p style={{ fontSize: 13, color: '#94a3b8' }}>{strategy.rebalanceAdvice}</p>
+                    <p style={{ fontSize: 13, color: '#cbd5e1' }}>{strategy.rebalanceAdvice}</p>
                   </div>
                 </div>
 
@@ -588,7 +588,7 @@ const Strategist = () => {
                         }}>
                           {i + 1}
                         </div>
-                        <p style={{ fontSize: 13, color: '#94a3b8', lineHeight: 1.55 }}>{risk}</p>
+                        <p style={{ fontSize: 13, color: '#cbd5e1', lineHeight: 1.55 }}>{risk}</p>
                       </div>
                     ))}
                   </div>
@@ -597,7 +597,7 @@ const Strategist = () => {
               </div>
 
               {/* Disclaimer */}
-              <p style={{ fontSize: 11, color: '#334155', textAlign: 'center', lineHeight: 1.6 }}>
+              <p style={{ fontSize: 11, color: '#94a3b8', textAlign: 'center', lineHeight: 1.6 }}>
                 ⚠️ This AI-generated strategy uses live market data and is for educational purposes only. It is not SEBI-registered investment advice. Past returns are not indicative of future performance. Always consult a certified financial advisor before investing.
               </p>
 
