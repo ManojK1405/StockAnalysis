@@ -1,7 +1,7 @@
 import express from 'express';
 import { 
   getWatchlist, addToWatchlist, removeFromWatchlist,
-  getPortfolio, addPortfolioItem 
+  getPortfolio, addPortfolioItem, syncBroker, executeStrategy
 } from '../controllers/portfolio.controller.js';
 import { auth } from '../middlewares/auth.middleware.js';
 
@@ -15,5 +15,7 @@ router.delete('/watchlist/:id', removeFromWatchlist);
 
 router.get('/portfolio', getPortfolio);
 router.post('/portfolio', addPortfolioItem);
+router.post('/broker-sync', syncBroker);
+router.post('/execute-strategy', executeStrategy);
 
 export default router;

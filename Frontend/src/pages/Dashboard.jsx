@@ -13,9 +13,23 @@ const Dashboard = () => {
   const [symbol, setSymbol] = useState('');
   const [searchInput, setSearchInput] = useState('');
   const [addingToWatchlist, setAddingToWatchlist] = useState(false);
+  const [isExtracting, setIsExtracting] = useState(false);
 
   const [suggestions, setSuggestions] = useState([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
+  const [marketStatus, setMarketStatus] = useState('Checking...');
+
+  useEffect(() => {
+    const fetchMarketStatus = async () => {
+      try {
+        const resp = await axios.get('http://localhost:5001/api/predictions/market-status');
+        setMarketStatus(resp.data.state === 'REGULAR' ? 'Open' : 'Closed');
+      } catch (err) {
+        setMarketStatus('Unknown');
+      }
+    };
+    fetchMarketStatus();
+  }, []);
 
   const fetchSuggestions = async (query) => {
     if (query.length < 2) {
@@ -37,12 +51,36 @@ const Dashboard = () => {
     setShowSuggestions(true);
   };
 
-  const handleKeyDown = (e) => {
+  const handleKeyDown = async (e) => {
     if (e.key === 'Enter' && searchInput.trim()) {
-      const formatted = searchInput.toUpperCase().includes('.') ? searchInput.toUpperCase() : `${searchInput.toUpperCase()}.NS`;
-      setSymbol(formatted);
-      setSearchInput(formatted);
       setShowSuggestions(false);
+      
+      setIsExtracting(true);
+      try {
+        const resp = await axios.post(`http://localhost:5001/api/predictions/extract-symbol`, { query: searchInput });
+        const extractedSymbol = resp.data.symbol;
+        
+        if (extractedSymbol) {
+          setSymbol(extractedSymbol);
+          setSearchInput(extractedSymbol);
+        } else {
+          // Fallback only if it looks like a ticker (one word, short)
+          const cleanInput = searchInput.trim();
+          if (!cleanInput.includes(' ') && cleanInput.length <= 12) {
+            const fallback = cleanInput.toUpperCase().includes('.') ? cleanInput.toUpperCase() : `${cleanInput.toUpperCase()}.NS`;
+            setSymbol(fallback);
+            setSearchInput(fallback);
+          } else {
+            alert('AI could not identify a specific stock ticker in your query. Please try searching for a company name or ticker symbol directly.');
+          }
+        }
+      } catch (err) {
+        console.error("Extraction error:", err);
+        const fallback = searchInput.toUpperCase().includes('.') ? searchInput.toUpperCase() : `${searchInput.toUpperCase()}.NS`;
+        setSymbol(fallback);
+      } finally {
+        setIsExtracting(false);
+      }
     }
   };
 
@@ -111,14 +149,43 @@ const Dashboard = () => {
       {/* Background Ambience */}
       <div className="absolute top-[-25%] left-[-15%] w-[70%] h-[70%] bg-blue-600/10 blur-[180px] rounded-full pointer-events-none mix-blend-screen" />
       <div className="absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] bg-fuchsia-600/10 blur-[150px] rounded-full pointer-events-none mix-blend-screen" />
+      <div className="absolute top-8 right-12 z-20 hidden md:flex items-center gap-6">
+        <div className="flex flex-col items-end">
+          <p className="text-[10px] uppercase font-bold tracking-[0.2em] text-slate-500 mb-1">Indian Market</p>
+          <div className="flex items-center gap-2">
+            {(() => {
+              const isOpen = marketStatus === 'Open';
+              return (
+                <>
+                  <div className={`w-2 h-2 rounded-full ${isOpen ? 'bg-emerald-500' : 'bg-rose-500'}`} />
+                  <span className={`text-sm font-black uppercase tracking-widest ${isOpen ? 'text-emerald-400' : 'text-rose-400'}`}>
+                    {marketStatus}
+                  </span>
+                </>
+              );
+            })()}
+          </div>
+        </div>
+      </div>
+
 
       <div className="relative z-10 p-8 md:p-12">
         <header className="flex mb-12 flex-col md:flex-row items-start md:items-center justify-between gap-6">
           <div>
-            <h1 className="text-4xl font-extrabold tracking-tight text-white flex items-center gap-3">
-              <Database className="w-8 h-8 text-blue-400" />
-              Global Equity Desk
-            </h1>
+            <div className="flex items-center gap-4">
+              <h1 className="text-4xl font-extrabold tracking-tight text-white flex items-center gap-3">
+                <Database className="w-8 h-8 text-blue-400" />
+                Global Equity Desk
+              </h1>
+              {data && (
+                <div className={`flex items-center gap-2 px-3 py-1 rounded-full border ${data.fundamentals?.marketState === 'REGULAR' ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' : 'bg-rose-500/10 border-rose-500/30 text-rose-400'} animate-pulse`}>
+                  <div className={`w-2 h-2 rounded-full ${data.fundamentals?.marketState === 'REGULAR' ? 'bg-emerald-500' : 'bg-rose-500 shadow-[0_0_10px_rgba(244,63,94,0.5)]'}`} />
+                  <span className="text-[10px] font-black uppercase tracking-widest">
+                    Market {data.fundamentals?.marketState === 'REGULAR' ? 'Open' : 'Closed'}
+                  </span>
+                </div>
+              )}
+            </div>
             <p className="mt-2 text-sm text-slate-400 font-medium uppercase tracking-[0.2em]">Institutional Engine & Predictive Modeling</p>
           </div>
           
@@ -128,13 +195,19 @@ const Dashboard = () => {
             </div>
             <input
               type="text"
-              placeholder="Search ticker (e.g. TCS.NS)..."
+              placeholder="Search ticker (e.g. Reliance, SBI, AAPL)..."
               value={searchInput}
               onChange={handleSearch}
               onKeyDown={handleKeyDown}
               onFocus={() => setShowSuggestions(true)}
-              className="w-full bg-[#0d1117]/80 backdrop-blur-xl border border-white/10 rounded-full py-4 pl-14 pr-6 text-white focus:outline-none focus:border-blue-500/50 focus:ring-4 focus:ring-blue-500/10 transition-all font-medium placeholder:text-slate-500 shadow-[0_0_30px_rgba(0,0,0,0.5)]"
+              className={`w-full bg-[#0d1117]/80 backdrop-blur-xl border ${isExtracting ? 'border-blue-500/50 outline-none ring-4 ring-blue-500/10' : 'border-white/10'} rounded-full py-4 pl-14 pr-6 text-white focus:outline-none focus:border-blue-500/50 focus:ring-4 focus:ring-blue-500/10 transition-all font-medium placeholder:text-slate-500 shadow-[0_0_30px_rgba(0,0,0,0.5)]`}
             />
+            
+            {isExtracting && (
+              <div className="absolute right-6 inset-y-0 flex items-center">
+                <div className="w-5 h-5 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
+              </div>
+            )}
             
             <AnimatePresence>
               {showSuggestions && suggestions.length > 0 && (
@@ -247,54 +320,96 @@ const Dashboard = () => {
                   </div>
                 </div>
 
-                {/* Algorithmic Side Panel */}
-                <div className="w-full xl:w-[400px] flex flex-col gap-6">
-                  {/* AI Prediction Box */}
-                  <div className="bg-gradient-to-br from-[#0e131f] to-[#0a0f18] border border-blue-500/20 rounded-[32px] p-8 shadow-[0_0_40px_rgba(59,130,246,0.05)] relative overflow-hidden group hover:border-blue-500/40 transition-colors">
-                    <div className="absolute -right-6 -top-6 text-blue-500/10 group-hover:text-blue-500/20 transition-colors">
-                       <Zap className="w-32 h-32" />
-                    </div>
+                {/* Institutional Research Report Panel */}
+                <div className="w-full xl:w-[480px] flex flex-col gap-6">
+                  {/* Signal Summary Bar */}
+                  <div className="bg-gradient-to-br from-[#0e131f] to-[#0a0f18] border border-white/10 rounded-[32px] p-8 shadow-2xl relative overflow-hidden group">
+                    <div className="absolute -inset-1 bg-gradient-to-r from-blue-600/20 to-fuchsia-600/20 blur opacity-30 group-hover:opacity-100 transition duration-1000 group-hover:duration-200" />
                     
-                    <p className="text-[10px] uppercase font-black tracking-[0.3em] text-blue-400 mb-6 shrink-0 relative z-10">Algorithmic Vector</p>
-                    <div className="flex items-center justify-between mb-8 relative z-10">
-                       <div>
-                         <p className="text-xs text-slate-500 uppercase tracking-widest font-bold mb-1">Compute Bias</p>
-                         <p className={`text-3xl font-black tracking-tight ${data.signal.toUpperCase().includes('BUY') ? 'text-emerald-400' : data.signal.toUpperCase().includes('SELL') ? 'text-rose-400' : 'text-slate-300'}`}>
-                           {data.signal}
-                         </p>
-                       </div>
-                       <div className="text-right">
-                         <p className="text-xs text-slate-500 uppercase tracking-widest font-bold mb-1">Trade Duration</p>
-                         <p className="text-lg font-black tracking-tight text-white mt-1">{data.duration}</p>
-                       </div>
-                    </div>
+                    <div className="relative z-10">
+                      <div className="flex items-center justify-between mb-6">
+                        <div>
+                          <p className="text-[10px] uppercase font-black tracking-[0.3em] text-blue-400 mb-1">Algorithmic Signal</p>
+                          <div className="flex items-center gap-4">
+                            <span className={`text-3xl font-black tracking-tighter ${data.signal.toUpperCase().includes('BUY') ? 'text-emerald-400' : data.signal.toUpperCase().includes('SELL') ? 'text-rose-400' : 'text-slate-300'}`}>
+                              {data.signal}
+                            </span>
+                            <span className={`text-xs font-black px-3 py-1 rounded-full ${data.signal.toUpperCase().includes('BUY') ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30' : 'bg-rose-500/15 text-rose-400 border border-rose-500/30'}`}>
+                              {(Math.abs(data.score) / 60 * 100).toFixed(0)}% confidence
+                            </span>
+                          </div>
+                        </div>
+                        <div className="w-12 h-12 rounded-2xl bg-blue-600/10 border border-blue-500/30 flex items-center justify-center text-blue-400">
+                          <Zap className="w-6 h-6 fill-current" />
+                        </div>
+                      </div>
 
-                    <div className="grid grid-cols-3 gap-2 relative z-10 mt-6 pt-6 border-t border-white/5">
-                      <div>
-                         <p className="text-[10px] uppercase font-black text-emerald-500/70 tracking-widest mb-1">Entry Price</p>
-                         <p className="text-[15px] xl:text-lg font-bold text-emerald-400">₹{data.buyLevel?.toFixed(1)}</p>
+                      {/* Signal Meter */}
+                      <div className="h-2 w-full bg-white/5 rounded-full overflow-hidden mb-6">
+                        <motion.div 
+                          initial={{ width: 0 }}
+                          animate={{ width: `${Math.min(Math.abs(data.score) / 60 * 100, 100)}%` }}
+                          transition={{ duration: 1.2, ease: 'easeOut' }}
+                          className={`h-full ${data.signal.toUpperCase().includes('BUY') ? 'bg-gradient-to-r from-emerald-600 to-emerald-400' : 'bg-gradient-to-r from-rose-600 to-rose-400'}`}
+                        />
                       </div>
-                      <div className="text-center">
-                         <p className="text-[10px] uppercase font-black text-blue-400/70 tracking-widest mb-1">Target</p>
-                         <p className="text-[15px] xl:text-lg font-bold text-blue-400">₹{data.sellLevel?.toFixed(1)}</p>
+
+                      {/* Trade Levels */}
+                      <div className="grid grid-cols-3 gap-3">
+                        <div className="bg-black/30 border border-emerald-500/15 p-4 rounded-2xl text-center">
+                          <p className="text-[9px] text-slate-500 uppercase tracking-widest font-black mb-2">Entry</p>
+                          <p className="text-lg font-black text-emerald-400">₹{data.buyLevel?.toLocaleString()}</p>
+                        </div>
+                        <div className="bg-black/30 border border-blue-500/15 p-4 rounded-2xl text-center">
+                          <p className="text-[9px] text-slate-500 uppercase tracking-widest font-black mb-2">Target</p>
+                          <p className="text-lg font-black text-blue-400">₹{data.sellLevel?.toLocaleString()}</p>
+                        </div>
+                        <div className="bg-black/30 border border-rose-500/15 p-4 rounded-2xl text-center">
+                          <p className="text-[9px] text-slate-500 uppercase tracking-widest font-black mb-2">Stop Loss</p>
+                          <p className="text-lg font-black text-rose-400">₹{data.stopLoss?.toLocaleString()}</p>
+                        </div>
                       </div>
-                      <div className="text-right border-l border-white/10">
-                         <p className="text-[10px] uppercase font-black text-rose-400/70 tracking-widest mb-1">Stop Loss</p>
-                         <p className="text-[15px] xl:text-lg font-bold text-rose-400">₹{data.stopLoss?.toFixed(1)}</p>
-                      </div>
+                      <p className="text-[10px] text-slate-500 text-center mt-3 uppercase tracking-widest font-bold">{data.duration}</p>
                     </div>
                   </div>
 
-                  {/* Smart Diagnostics */}
-                  <div className="bg-[#090d14]/80 backdrop-blur-xl border border-white/10 rounded-[32px] p-8 flex-1">
-                    <p className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400 mb-6">Analytic Rationale</p>
-                    <div className="space-y-5">
-                      {data.reasoning.map((reason, i) => (
-                        <div key={i} className="flex gap-4 items-start">
-                          <div className="w-1.5 h-1.5 rounded-full bg-blue-500 shrink-0 mt-2 shadow-[0_0_10px_rgba(59,130,246,0.8)]" />
-                          <p className="text-[13px] text-slate-300 leading-relaxed font-medium">{reason}</p>
-                        </div>
-                      ))}
+                  {/* Full AI Research Report */}
+                  <div className="bg-[#090d14]/80 backdrop-blur-xl border border-white/10 rounded-[32px] p-8 flex-1 shadow-2xl">
+                    <div className="flex items-center gap-3 mb-6">
+                      <Cpu className="w-5 h-5 text-blue-400" />
+                      <h3 className="text-lg font-black text-white tracking-tight">Institutional Research Note</h3>
+                    </div>
+                    <div className="space-y-4 max-h-[500px] overflow-y-auto pr-2 custom-scrollbar">
+                      {data.reasoning.map((reason, i) => {
+                        // Detect section headers (bold text like **Trend & Structure**)
+                        const headerMatch = reason.match(/^\*\*(.+?)\*\*/);
+                        const isHeader = headerMatch || reason.match(/^\d+\.\s*\*\*/);
+                        const cleanedReason = reason
+                          .replace(/^\d+\.\s*/, '')
+                          .replace(/\*\*/g, '')
+                          .replace(/^\*\s*/, '')
+                          .replace(/^-\s*/, '');
+
+                        if (isHeader) {
+                          const title = headerMatch ? headerMatch[1] : cleanedReason.split(':')[0];
+                          const body = cleanedReason.replace(title, '').replace(/^[:\s-]+/, '').trim();
+                          return (
+                            <div key={i} className="mt-2">
+                              <div className="flex items-center gap-2 mb-2">
+                                <div className="w-2 h-2 rounded-full bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.8)]" />
+                                <p className="text-sm font-black text-blue-400 uppercase tracking-wider">{title}</p>
+                              </div>
+                              {body && <p className="text-[13px] text-slate-300 leading-relaxed font-medium pl-4 border-l border-white/5">{body}</p>}
+                            </div>
+                          );
+                        }
+
+                        return (
+                          <div key={i} className="flex gap-3 items-start pl-4 border-l border-white/5">
+                            <p className="text-[13px] text-slate-300 leading-relaxed font-medium">{cleanedReason}</p>
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
                 </div>
@@ -326,6 +441,10 @@ const Dashboard = () => {
                      <div className="border-l border-white/10 pl-4">
                        <p className="text-[10px] uppercase font-black tracking-widest text-slate-500 mb-1">Beta Risk</p>
                        <p className="text-xl font-bold text-white">{data.fundamentals?.beta?.toFixed(2) || 'N/A'}</p>
+                     </div>
+                     <div className="border-l border-white/10 pl-4">
+                       <p className="text-[10px] uppercase font-black tracking-widest text-slate-500 mb-1">State</p>
+                       <p className={`text-xl font-bold ${data.fundamentals?.marketState === 'REGULAR' ? 'text-emerald-400' : 'text-slate-400'}`}>{data.fundamentals?.marketState || 'N/A'}</p>
                      </div>
                    </div>
                 </div>

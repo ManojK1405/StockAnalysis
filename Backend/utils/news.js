@@ -3,19 +3,22 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
-export const fetchStockNews = async (query) => {
+export const fetchStockNews = async (symbol, name, sector) => {
     const apiKey = process.env.NEWS_API_KEY;
     if (!apiKey) return [];
 
     try {
-        const cleanQuery = query.split('.')[0];
+        const cleanSymbol = symbol.split('.')[0];
+        // Create a precise query including company name, ticker, and sector
+        const sectorClause = sector ? ` OR "${sector}" industry` : '';
+        const searchQuery = `("${name}" OR "${cleanSymbol}") AND (stock OR earnings OR performance OR market)${sectorClause}`;
         
         const response = await axios.get(`https://newsapi.org/v2/everything`, {
             params: {
-                q: `${cleanQuery} stock OR Indian market`,
-                sortBy: 'publishedAt',
+                q: searchQuery,
+                sortBy: 'relevancy', // Changed from publishedAt for better precision
                 language: 'en',
-                pageSize: 10,
+                pageSize: 12,
                 apiKey: apiKey
             }
         });

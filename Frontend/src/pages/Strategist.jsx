@@ -2,10 +2,11 @@ import React, { useState } from 'react';
 import {
   Target, Wallet, TrendingUp, ShieldCheck, Briefcase, ChevronRight,
   Sparkles, RefreshCw, AlertTriangle, BarChart2, Clock, Layers,
-  CheckCircle2, XCircle, ArrowRight, Globe2, Coins
+  CheckCircle2, XCircle, ArrowRight, Globe2, Coins, Info,
+  Bookmark, Share2, Trash2, Edit
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { generateStrategy } from '../api/index.js';
+import { generateStrategy, generateReverseStrategy, executeStrategy, saveStrategyAction, getSavedStrategies, deleteSavedStrategy, updateSavedStrategy } from '../api/index.js';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -106,14 +107,25 @@ function AllocBar({ allocation }) {
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 const Strategist = () => {
+  // ── States
+  const [mode, setMode] = useState('standard'); // standard | reverse | saved
   const [step, setStep] = useState(1);
-  const [amount, setAmount]       = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  const [amount, setAmount] = useState('');
   const [riskLevel, setRiskLevel] = useState('');
-  const [sector, setSector]       = useState('any');
-  const [horizon, setHorizon]     = useState('medium');
-  const [loading, setLoading]     = useState(false);
-  const [error, setError]         = useState('');
-  const [strategy, setStrategy]   = useState(null);
+  const [sector, setSector] = useState('any');
+  const [horizon, setHorizon] = useState(2);
+  const [strategy, setStrategy] = useState(null);
+
+  // Reverse Mode
+  const [goalQuery, setGoalQuery] = useState('');
+  const [reverseResult, setReverseResult] = useState(null);
+
+  // Saved Strategies Mode
+  const [savedPlans, setSavedPlans] = useState([]);
+  const [editingPlan, setEditingPlan] = useState(null);
 
   const formatINR = (n) =>
     new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(n);
@@ -123,6 +135,7 @@ const Strategist = () => {
     setLoading(true);
     setError('');
     setStrategy(null);
+    setReverseResult(null);
 
     try {
       const res = await generateStrategy({ amount: parseFloat(amount), riskLevel, sector, horizon });
@@ -135,10 +148,51 @@ const Strategist = () => {
     }
   };
 
+  const handleReverseGenerate = async () => {
+     if (!goalQuery.trim()) return;
+     setLoading(true);
+     setError('');
+     setStrategy(null);
+     setReverseResult(null);
+
+     try {
+       const res = await generateReverseStrategy({ goalQuery });
+       setReverseResult(res.data);
+       setStep(4);
+     } catch (err) {
+       setError(err.response?.data?.error || 'Strategic blueprint failed. Please try again.');
+     } finally {
+       setLoading(false);
+     }
+  };
+
   const reset = () => {
     setStep(1); setAmount(''); setRiskLevel('');
-    setSector('any'); setHorizon('medium');
-    setStrategy(null); setError('');
+    setSector('any'); setHorizon(2); setGoalQuery('');
+    setStrategy(null); setReverseResult(null); setError('');
+  };
+
+  const handleExecuteOrders = async (trades) => {
+    const apiKey = localStorage.getItem('broker_api_key');
+    if (!apiKey) {
+      alert("Please connect to your Zerodha account in the Portfolio Hub first!");
+      return;
+    }
+    
+    // confirm with user
+    if (!window.confirm("Execute this entire strategy via live market orders on Zerodha?\n\nWARNING: Real money will be utilized!")) return;
+    
+    setLoading(true);
+    try {
+       // Map 'name' to 'symbol' as the backend specifically looks for 'trade.symbol'
+       const mappedTrades = trades.map(t => ({ ...t, symbol: t.name }));
+       const response = await executeStrategy({ apiKey, trades: mappedTrades });
+       alert(response.data.message + "\nCheck Portfolio Hub for statuses.");
+    } catch(err) {
+       alert(err.response?.data?.error || "Failed to execute. Order blocked by API.");
+    } finally {
+       setLoading(false);
+    }
   };
 
   // ── Shared card style
@@ -159,12 +213,35 @@ const Strategist = () => {
           AI Investment Strategist
         </h1>
         <p style={{ color: '#64748b', marginTop: 8, fontSize: 16 }}>
-          Answer 3 quick questions. Get a live market-backed strategy — no templates, no guesswork.
+          {mode === 'standard' ? 'Answer 3 quick questions. Get a live market-backed strategy — no templates, no guesswork.' : 'Describe your dream goal. We\'ll calculate exactly how much to invest monthly to get there.'}
         </p>
+
+        {/* Mode Tabs */}
+        <div style={{ display: 'flex', gap: 8, marginTop: 20 }}>
+          {[
+            { id: 'standard', label: 'Portfolio Strategy', emoji: '📊' },
+            { id: 'reverse',  label: 'Goal Acquisition',  emoji: '🎯' },
+          ].map(m => (
+            <button
+              key={m.id}
+              onClick={() => { setMode(m.id); reset(); }}
+              style={{
+                padding: '12px 24px', borderRadius: 14, cursor: 'pointer', fontSize: 14, fontWeight: 700,
+                background: mode === m.id ? 'linear-gradient(135deg,#6366f1,#818cf8)' : 'rgba(255,255,255,0.04)',
+                border: `1.5px solid ${mode === m.id ? '#6366f1' : 'rgba(255,255,255,0.1)'}`,
+                color: mode === m.id ? '#fff' : '#94a3b8',
+                transition: 'all 0.3s',
+                display: 'flex', alignItems: 'center', gap: 8,
+              }}
+            >
+              <span style={{ fontSize: 18 }}>{m.emoji}</span> {m.label}
+            </button>
+          ))}
+        </div>
       </div>
 
-      {/* Step indicator */}
-      {step < 4 && (
+      {/* Step indicator (standard mode only) */}
+      {mode === 'standard' && step < 4 && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 0, marginBottom: 40 }}>
           {[1, 2, 3].map((s, i) => (
             <React.Fragment key={s}>
@@ -184,7 +261,7 @@ const Strategist = () => {
       <AnimatePresence mode="wait">
 
         {/* ── STEP 1: Amount ─────────────────────────────────────────────── */}
-        {step === 1 && (
+        {mode === 'standard' && step === 1 && (
           <motion.div key="step1"
             initial={{ opacity: 0, x: 30 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -30 }}
             transition={{ duration: 0.3 }}
@@ -248,7 +325,7 @@ const Strategist = () => {
         )}
 
         {/* ── STEP 2: Risk + Sector ───────────────────────────────────────── */}
-        {step === 2 && (
+        {mode === 'standard' && step === 2 && (
           <motion.div key="step2"
             initial={{ opacity: 0, x: 30 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -30 }}
             transition={{ duration: 0.3 }}
@@ -326,7 +403,7 @@ const Strategist = () => {
         )}
 
         {/* ── STEP 3: Horizon + Generate ──────────────────────────────────── */}
-        {step === 3 && (
+        {mode === 'standard' && step === 3 && (
           <motion.div key="step3"
             initial={{ opacity: 0, x: 30 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -30 }}
             transition={{ duration: 0.3 }}
@@ -338,23 +415,35 @@ const Strategist = () => {
                   <Clock color="#6366f1" size={22} />
                   <h2 style={{ fontSize: 20, fontWeight: 700, color: '#f1f5f9' }}>How long do you plan to stay invested?</h2>
                 </div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
-                  {HORIZONS.map(h => {
-                    const Icon = h.icon;
-                    const active = horizon === h.id;
-                    return (
-                      <button key={h.id} onClick={() => setHorizon(h.id)} style={{
-                        padding: '20px 16px', borderRadius: 16, cursor: 'pointer', textAlign: 'center',
-                        background: active ? 'rgba(99,102,241,0.12)' : 'rgba(255,255,255,0.03)',
-                        border: `1.5px solid ${active ? '#6366f1' : 'rgba(255,255,255,0.08)'}`,
-                        transition: 'all 0.25s',
-                      }}>
-                        <Icon size={22} color={active ? '#6366f1' : '#475569'} style={{ margin: '0 auto 10px' }} />
-                        <p style={{ fontSize: 14, fontWeight: 700, color: active ? '#a5b4fc' : '#94a3b8' }}>{h.label}</p>
-                        <p style={{ fontSize: 12, color: '#cbd5e1', marginTop: 4 }}>{h.sub}</p>
-                      </button>
-                    );
-                  })}
+                
+                <div style={{ width: '100%', padding: '10px 0 20px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12 }}>
+                    <span style={{ fontSize: 32, fontWeight: 800, color: '#a5b4fc', letterSpacing: -1 }}>
+                      {horizon} <span style={{ fontSize: 16, fontWeight: 600, color: '#94a3b8' }}>Year{horizon > 1 ? 's' : ''}</span>
+                    </span>
+                  </div>
+                  
+                  <input 
+                    type="range" 
+                    min="1" 
+                    max="15" 
+                    step="1"
+                    value={horizon}
+                    onChange={(e) => setHorizon(parseFloat(e.target.value))}
+                    style={{
+                      width: '100%',
+                      cursor: 'pointer',
+                      accentColor: '#6366f1',
+                      height: '6px',
+                      borderRadius: '3px',
+                      background: 'rgba(255,255,255,0.1)',
+                      outline: 'none',
+                    }}
+                  />
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 12 }}>
+                    <span style={{ fontSize: 12, fontWeight: 600, color: '#64748b' }}>1 Year</span>
+                    <span style={{ fontSize: 12, fontWeight: 600, color: '#64748b' }}>15 Years</span>
+                  </div>
                 </div>
               </div>
 
@@ -366,7 +455,7 @@ const Strategist = () => {
                     { label: 'Amount', val: formatINR(parseFloat(amount) || 0), icon: Wallet },
                     { label: 'Risk', val: RISK_LEVELS.find(r => r.id === riskLevel)?.label || '—', icon: ShieldCheck },
                     { label: 'Sector', val: SECTORS.find(s => s.id === sector)?.label || 'Any', icon: Globe2 },
-                    { label: 'Horizon', val: HORIZONS.find(h => h.id === horizon)?.sub || '—', icon: Clock },
+                    { label: 'Horizon', val: `${horizon} Year${horizon > 1 ? 's' : ''}`, icon: Clock },
                   ].map(({ label, val, icon: Icon }) => (
                     <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                       <Icon size={16} color="#6366f1" />
@@ -414,7 +503,7 @@ const Strategist = () => {
         )}
 
         {/* ── STEP 4: Results ─────────────────────────────────────────────── */}
-        {step === 4 && strategy && (
+        {mode === 'standard' && step === 4 && strategy && (
           <motion.div key="step4"
             initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.4 }}
@@ -596,11 +685,240 @@ const Strategist = () => {
 
               </div>
 
+              {/* Execution Execution Action */}
+              <button 
+                onClick={() => handleExecuteOrders(strategy.allocation)}
+                disabled={loading}
+                style={{
+                  marginTop: 32, width: '100%', padding: '18px', borderRadius: 16, cursor: loading ? 'wait' : 'pointer',
+                  background: 'linear-gradient(135deg, #10b981, #059669)',
+                  border: '1px solid rgba(16,185,129,0.5)', color: '#fff', fontSize: 16, fontWeight: 800,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
+                  boxShadow: '0 8px 32px rgba(16,185,129,0.3)', transition: 'all 0.3s',
+                  textTransform: 'uppercase', letterSpacing: 1
+                }}
+              >
+                {loading ? (
+                  <><RefreshCw size={20} style={{ animation: 'spin 1s linear infinite' }} /> Processing Live Execution…</>
+                ) : (
+                  <><Briefcase size={20} /> Execute Strategy via Zerodha</>
+                )}
+              </button>
+
               {/* Disclaimer */}
               <p style={{ fontSize: 11, color: '#94a3b8', textAlign: 'center', lineHeight: 1.6 }}>
                 ⚠️ This AI-generated strategy uses live market data and is for educational purposes only. It is not SEBI-registered investment advice. Past returns are not indicative of future performance. Always consult a certified financial advisor before investing.
               </p>
 
+            </div>
+          </motion.div>
+        )}
+
+        {/* ── REVERSE MODE: Goal Input ───────────────────────────────────── */}
+        {mode === 'reverse' && step < 4 && (
+          <motion.div key="reverse-input"
+            initial={{ opacity: 0, x: 30 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -30 }}
+            transition={{ duration: 0.3 }}
+          >
+            <div style={card}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 24 }}>
+                <Target color="#f59e0b" size={22} />
+                <h2 style={{ fontSize: 20, fontWeight: 700, color: '#f1f5f9' }}>Describe your financial goal</h2>
+              </div>
+
+              <textarea
+                value={goalQuery}
+                onChange={e => setGoalQuery(e.target.value)}
+                placeholder="e.g. I want to buy a Ducati Streetfighter V4S in 6 years&#10;e.g. Save ₹50 lakh for my daughter's education in 10 years&#10;e.g. Buy a 3BHK flat in Bangalore in 8 years"
+                rows={4}
+                style={{
+                  width: '100%', boxSizing: 'border-box',
+                  background: 'rgba(255,255,255,0.05)', border: '1.5px solid rgba(245,158,11,0.3)',
+                  borderRadius: 16, padding: '18px 20px',
+                  fontSize: 16, fontWeight: 600, color: '#f1f5f9', outline: 'none',
+                  resize: 'vertical', lineHeight: 1.6, fontFamily: 'inherit',
+                }}
+              />
+              <p style={{ fontSize: 13, color: '#94a3b8', marginTop: 10, display: 'flex', alignItems: 'center', gap: 6 }}>
+                <Info size={14} color="#f59e0b" />
+                <strong>Tip:</strong> Always enter the <em>current</em> cost of your goal (in today's rupees). Our AI will automatically factor in timeline inflation.
+              </p>
+
+              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 16 }}>
+                {[
+                  'Buy a Ducati Streetfighter V4S in 6 years',
+                  'Save ₹50L for MBA abroad in 3 years',
+                  'Buy a 2BHK in Mumbai in 10 years',
+                  'Build a ₹1 Crore retirement corpus in 15 years',
+                ].map(suggestion => (
+                  <button key={suggestion} onClick={() => setGoalQuery(suggestion)}
+                    style={{
+                      padding: '8px 14px', borderRadius: 99, cursor: 'pointer', fontSize: 12, fontWeight: 600,
+                      background: goalQuery === suggestion ? 'rgba(245,158,11,0.2)' : 'rgba(255,255,255,0.05)',
+                      border: `1.5px solid ${goalQuery === suggestion ? '#f59e0b' : 'rgba(255,255,255,0.1)'}`,
+                      color: goalQuery === suggestion ? '#fbbf24' : '#94a3b8', transition: 'all 0.2s',
+                      textAlign: 'left',
+                    }}
+                  >
+                    {suggestion}
+                  </button>
+                ))}
+              </div>
+
+              {error && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '14px 18px', borderRadius: 12, background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', color: '#fca5a5', marginTop: 16 }}>
+                  <XCircle size={18} color="#ef4444" /> {error}
+                </div>
+              )}
+
+              <button onClick={handleReverseGenerate} disabled={loading || !goalQuery.trim()}
+                style={{
+                  marginTop: 24, width: '100%', padding: '16px', borderRadius: 14, cursor: loading ? 'wait' : 'pointer',
+                  background: goalQuery.trim() ? 'linear-gradient(135deg,#f59e0b,#fbbf24)' : 'rgba(255,255,255,0.06)',
+                  border: 'none', color: '#0f172a', fontSize: 16, fontWeight: 800,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
+                  boxShadow: goalQuery.trim() ? '0 8px 32px rgba(245,158,11,0.35)' : 'none',
+                  transition: 'all 0.3s', opacity: (!goalQuery.trim() || loading) ? 0.5 : 1,
+                }}
+              >
+                {loading ? (
+                  <>
+                    <RefreshCw size={18} style={{ animation: 'spin 1s linear infinite' }} />
+                    Calculating inflation & building plan…
+                  </>
+                ) : (
+                  <>
+                    <Target size={18} /> Generate Goal Blueprint
+                  </>
+                )}
+              </button>
+            </div>
+          </motion.div>
+        )}
+
+        {/* ── REVERSE MODE: Results ──────────────────────────────────────── */}
+        {mode === 'reverse' && step === 4 && reverseResult && (
+          <motion.div key="reverse-results"
+            initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.4 }}
+          >
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+
+              {/* Hero */}
+              <div style={{
+                ...card,
+                background: 'linear-gradient(135deg, rgba(245,158,11,0.15) 0%, rgba(234,88,12,0.08) 100%)',
+                border: '1px solid rgba(245,158,11,0.3)',
+              }}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: 16 }}>
+                  <div>
+                    <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1.5, color: '#f59e0b' }}>
+                      Goal Acquisition Blueprint
+                    </span>
+                    <h2 style={{ fontSize: 28, fontWeight: 800, color: '#f8fafc', marginTop: 6, marginBottom: 10 }}>
+                      {reverseResult.goalTitle}
+                    </h2>
+                  </div>
+                  <button onClick={reset} style={{
+                    display: 'flex', alignItems: 'center', gap: 6, padding: '10px 18px', borderRadius: 10,
+                    background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)',
+                    color: '#94a3b8', fontSize: 13, fontWeight: 600, cursor: 'pointer',
+                  }}>
+                    <RefreshCw size={14} /> New Goal
+                  </button>
+                </div>
+
+                {/* KPI Strip */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 12, marginTop: 24 }}>
+                  {[
+                    { label: 'Current Value', val: formatINR(reverseResult.currentValuation || 0), color: '#94a3b8' },
+                    { label: 'Future Value', val: formatINR(reverseResult.futureValuation || 0), color: '#f59e0b' },
+                    { label: 'Monthly SIP', val: formatINR(reverseResult.monthlySIP || 0), color: '#10b981' },
+                    { label: 'Timeline', val: `${reverseResult.timeframeYears || '?'} Years`, color: '#6366f1' },
+                  ].map(({ label, val, color }) => (
+                    <div key={label} style={{
+                      background: 'rgba(0,0,0,0.25)', borderRadius: 14, padding: '14px 16px',
+                      border: '1px solid rgba(255,255,255,0.07)',
+                    }}>
+                      <p style={{ fontSize: 11, color: '#cbd5e1', fontWeight: 600, textTransform: 'uppercase', marginBottom: 6 }}>{label}</p>
+                      <p style={{ fontSize: 18, fontWeight: 800, color }}>{val}</p>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Inflation & Feasibility */}
+                <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginTop: 16 }}>
+                  <div style={{ padding: '8px 16px', borderRadius: 99, fontSize: 12, fontWeight: 700, background: 'rgba(245,158,11,0.12)', border: '1px solid rgba(245,158,11,0.25)', color: '#fbbf24' }}>
+                    Inflation Factor: {reverseResult.compoundedInflation || '~8.5%'}
+                  </div>
+                  <div style={{ padding: '8px 16px', borderRadius: 99, fontSize: 12, fontWeight: 700, background: 'rgba(16,185,129,0.12)', border: '1px solid rgba(16,185,129,0.25)', color: '#34d399' }}>
+                    Assumed Return: {reverseResult.assumedAnnualReturn || 12.5}% p.a.
+                  </div>
+                  <div style={{
+                    padding: '8px 16px', borderRadius: 99, fontSize: 12, fontWeight: 700, 
+                    background: (reverseResult.feasibilityScore || 0) >= 70 ? 'rgba(16,185,129,0.12)' : (reverseResult.feasibilityScore || 0) >= 40 ? 'rgba(245,158,11,0.12)' : 'rgba(239,68,68,0.12)',
+                    border: `1px solid ${(reverseResult.feasibilityScore || 0) >= 70 ? 'rgba(16,185,129,0.25)' : (reverseResult.feasibilityScore || 0) >= 40 ? 'rgba(245,158,11,0.25)' : 'rgba(239,68,68,0.25)'}`,
+                    color: (reverseResult.feasibilityScore || 0) >= 70 ? '#34d399' : (reverseResult.feasibilityScore || 0) >= 40 ? '#fbbf24' : '#f87171',
+                  }}>
+                    Feasibility: {reverseResult.feasibilityScore || '?'}/100
+                  </div>
+                </div>
+              </div>
+
+              {/* SIP Allocation */}
+              <div style={card}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20 }}>
+                  <Briefcase color="#f59e0b" size={20} />
+                  <h3 style={{ fontSize: 18, fontWeight: 700, color: '#f1f5f9' }}>Recommended SIP Allocation</h3>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  {(reverseResult.allocation || []).map((item, i) => {
+                    const colorMap = { Stock: '#6366f1', Debt: '#10b981', Gold: '#f59e0b', Cash: '#94a3b8' };
+                    const typeColor = colorMap[item.type] || '#6366f1';
+                    return (
+                      <motion.div key={i}
+                        initial={{ opacity: 0, x: -16 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        transition={{ delay: i * 0.08 }}
+                        style={{
+                          display: 'flex', alignItems: 'flex-start', gap: 16, padding: '18px 20px',
+                          borderRadius: 16, background: 'rgba(255,255,255,0.025)',
+                          border: '1px solid rgba(255,255,255,0.07)',
+                        }}
+                      >
+                        <div style={{
+                          minWidth: 56, height: 56, borderRadius: 14,
+                          background: `${typeColor}15`, display: 'flex', flexDirection: 'column',
+                          alignItems: 'center', justifyContent: 'center', gap: 2,
+                        }}>
+                          <span style={{ fontSize: 18, fontWeight: 800, color: typeColor }}>{item.percentage}%</span>
+                          <span style={{ fontSize: 9, fontWeight: 700, color: typeColor, textTransform: 'uppercase', letterSpacing: 0.5 }}>{item.type}</span>
+                        </div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <h4 style={{ fontSize: 14, fontWeight: 700, color: '#f1f5f9' }}>{item.assets}</h4>
+                          <p style={{ fontSize: 12, color: '#64748b', marginTop: 4, lineHeight: 1.55 }}>{item.logic}</p>
+                        </div>
+                      </motion.div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Architect's Advisory */}
+              {reverseResult.architectAdvice && (
+                <div style={{ ...card, background: 'rgba(245,158,11,0.06)', border: '1px solid rgba(245,158,11,0.2)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+                    <Layers color="#f59e0b" size={18} />
+                    <h3 style={{ fontSize: 16, fontWeight: 700, color: '#f1f5f9' }}>Architect's Advisory</h3>
+                  </div>
+                  <p style={{ fontSize: 14, color: '#cbd5e1', lineHeight: 1.65 }}>{reverseResult.architectAdvice}</p>
+                </div>
+              )}
+
+              {/* Disclaimer */}
+              <p style={{ fontSize: 11, color: '#94a3b8', textAlign: 'center', lineHeight: 1.6 }}>
+                ⚠️ Projections use estimated inflation rates and assumed portfolio returns. Actual results will vary. This is not SEBI-registered advice. Consult a certified financial advisor before investing.
+              </p>
             </div>
           </motion.div>
         )}

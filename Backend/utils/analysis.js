@@ -259,8 +259,22 @@ export const analyzeStock = (history, sentiment = 0) => {
 
   const isBearish = signal.includes('SELL');
   const entry = lastPrice;
-  const target = isBearish ? Math.min(pivotData.s1 || entry * 0.95, entry * 0.98) : Math.max(pivotData.r1 || entry * 1.05, entry * 1.02);
-  const sl = isBearish ? Math.max(pivotData.r1 || entry * 1.03, entry * 1.01) : Math.min(pivotData.s1 || entry * 0.97, entry * 0.99);
+  
+  // High-fidelity level calculation
+  let target, sl;
+  if (isBearish) {
+    // For Sell/Short: Target below, SL above
+    target = pivotData.s1 < entry * 0.99 ? pivotData.s1 : entry * 0.95;
+    sl = pivotData.r1 > entry * 1.01 ? pivotData.r1 : entry * 1.03;
+  } else {
+    // For Buy/Long: Target above, SL below
+    target = pivotData.r1 > entry * 1.01 ? pivotData.r1 : entry * 1.05;
+    sl = pivotData.s1 < entry * 0.99 ? pivotData.s1 : entry * 0.97;
+  }
+
+  // Final safety checks to ensure no zeros or nulls
+  const finalTarget = parseFloat((target || (isBearish ? entry * 0.95 : entry * 1.05)).toFixed(2));
+  const finalSl = parseFloat((sl || (isBearish ? entry * 1.03 : entry * 0.97)).toFixed(2));
 
   return {
     symbol: '', 
@@ -269,8 +283,8 @@ export const analyzeStock = (history, sentiment = 0) => {
     currentPrice: lastPrice,
     rsi: currentRSI,
     buyLevel: entry, 
-    sellLevel: target, 
-    stopLoss: sl,  
+    sellLevel: finalTarget, 
+    stopLoss: finalSl,  
     duration: '2 - 6 Weeks (Swing)',
     reasoning,
     indicators: {

@@ -1,10 +1,38 @@
 import express from 'express';
 import { getStockPrediction } from '../controllers/prediction.controller.js';
+import { extractStockSymbol } from '../utils/gemini.js';
 
 const router = express.Router();
 
+// GET global market status via NIFTY 50
+router.get('/market-status', async (req, res) => {
+    try {
+        const YahooFinance = (await import('yahoo-finance2')).default;
+        const yf = new YahooFinance();
+        // Check NIFTY 50 index for Indian market status
+        const quote = await yf.quote('^NSEI').catch(() => null);
+        const state = quote?.marketState || 'CLOSED';
+        res.json({ state });
+    } catch (error) {
+        res.status(500).json({ error: 'Market status check failed', state: 'CLOSED' });
+    }
+});
+
 // GET prediction for a specific stock
 router.get('/:symbol', getStockPrediction);
+
+// POST extract symbol from natural language
+router.post('/extract-symbol', async (req, res) => {
+    try {
+        const { query } = req.body;
+        if (!query) return res.status(400).json({ error: 'Query is required' });
+        
+        const symbol = await extractStockSymbol(query);
+        res.json({ symbol });
+    } catch (error) {
+        res.status(500).json({ error: 'Extraction failed' });
+    }
+});
 
 // GET search suggestions
 router.get('/search/:query', async (req, res) => {

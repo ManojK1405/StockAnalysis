@@ -8,6 +8,10 @@ const Portfolio = () => {
   const [portfolio, setPortfolio] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showAddModal, setShowAddModal] = useState(false);
+  const [showBrokerModal, setShowBrokerModal] = useState(false);
+  const [selectedBroker, setSelectedBroker] = useState('zerodha');
+  const [brokerKey, setBrokerKey] = useState('');
+  const [isBrokerConnected, setIsBrokerConnected] = useState(false);
   const [newItem, setNewItem] = useState({ symbol: '', quantity: '', avgPrice: '' });
 
   const fetchData = async () => {
@@ -42,6 +46,28 @@ const Portfolio = () => {
       fetchData();
     } catch (error) {
       console.error('Error adding portfolio item:', error);
+    }
+  };
+
+  const handleConnectBroker = async (e) => {
+    e.preventDefault();
+    if (!brokerKey) return;
+    
+    setShowBrokerModal(false);
+    setLoading(true);
+    
+    try {
+      await api.syncBroker({
+        brokerName: selectedBroker,
+        apiKey: brokerKey
+      });
+      setIsBrokerConnected(true);
+      localStorage.setItem('broker_api_key', brokerKey);
+      await fetchData();
+    } catch (err) {
+      console.error(err);
+      alert(err.response?.data?.error || 'Failed to connect to broker. Please check your API key.');
+      setLoading(false);
     }
   };
 
@@ -90,6 +116,22 @@ const Portfolio = () => {
                 <p className="text-[10px] uppercase font-bold tracking-widest text-slate-500 mb-1">Total Vault Value</p>
                 <p className="text-xl font-black text-white">₹{totalCurrent.toLocaleString(undefined, { maximumFractionDigits: 0 })}</p>
              </div>
+             
+             {isBrokerConnected ? (
+               <div className="flex items-center gap-2 bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 px-5 py-4 rounded-2xl font-bold shadow-[0_0_20px_rgba(16,185,129,0.15)]">
+                 <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                 Live: {selectedBroker === 'zerodha' ? 'Kite Connect' : 'Groww API'}
+               </div>
+             ) : (
+               <button 
+                 onClick={() => setShowBrokerModal(true)}
+                 className="flex items-center gap-2 bg-white/5 border border-white/10 hover:bg-white/10 text-white px-5 py-4 rounded-2xl font-bold transition-all"
+               >
+                 <Activity className="w-5 h-5 text-fuchsia-400" />
+                 Connect Broker
+               </button>
+             )}
+
              <button 
                onClick={() => setShowAddModal(true)}
                className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white px-6 py-4 rounded-2xl font-bold transition-all shadow-[0_0_20px_rgba(37,99,235,0.3)] hover:shadow-[0_0_30px_rgba(37,99,235,0.5)]"
@@ -297,6 +339,71 @@ const Portfolio = () => {
                     className="flex-1 bg-blue-600 hover:bg-blue-500 text-white font-bold py-4 rounded-2xl transition-all shadow-[0_0_20px_rgba(37,99,235,0.4)]"
                   >
                     Confirm Injection
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Broker Connect Modal */}
+      <AnimatePresence>
+        {showBrokerModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-[#03060b]/90 backdrop-blur-lg">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="bg-[#0d1117] p-10 w-full max-w-md shadow-[0_0_80px_rgba(217,70,239,0.15)] rounded-[40px] border border-white/10 relative overflow-hidden"
+            >
+              <div className="absolute top-0 right-0 w-64 h-64 bg-fuchsia-500/10 blur-[80px] pointer-events-none" />
+              
+              <h3 className="text-2xl font-black text-white mb-2 tracking-tight flex items-center gap-3 relative z-10">
+                 <Activity className="w-6 h-6 text-fuchsia-400" />
+                 Connect Live Broker
+              </h3>
+              <p className="text-sm font-medium text-slate-400 mb-8 relative z-10">Sync your live equity holdings instantly via official broker APIs.</p>
+              
+              <form onSubmit={handleConnectBroker} className="space-y-6 relative z-10">
+                <div className="space-y-3">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Select Broker</label>
+                  <div className="grid grid-cols-1 gap-3">
+                     <div 
+                       onClick={() => setSelectedBroker('zerodha')}
+                       className={`flex items-center justify-center gap-2 p-4 rounded-2xl border cursor-pointer transition-all bg-orange-500/10 border-orange-500/50 text-orange-400`}
+                     >
+                        <strong className="text-sm">Zerodha Kite (Kite Connect API)</strong>
+                     </div>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">API Authentication Key</label>
+                  <input 
+                    type="password" 
+                    required
+                    placeholder="Enter your API Key..."
+                    className="w-full bg-black/50 border border-white/10 rounded-2xl py-4 px-5 focus:outline-none focus:border-fuchsia-500/50 focus:ring-2 focus:ring-fuchsia-500/20 transition-all text-sm font-bold text-white placeholder:text-slate-600"
+                    value={brokerKey}
+                    onChange={(e) => setBrokerKey(e.target.value)}
+                  />
+                  <p className="text-[10px] text-slate-500 mt-2 ml-1">Keys are encrypted end-to-end and purely used for read-only sync operations.</p>
+                </div>
+
+                <div className="flex gap-4 mt-8">
+                  <button 
+                    type="button" 
+                    onClick={() => setShowBrokerModal(false)}
+                    className="flex-1 px-6 py-4 rounded-2xl border border-white/10 hover:bg-white/5 transition-all font-bold text-sm text-slate-400"
+                  >
+                    Cancel
+                  </button>
+                  <button 
+                    type="submit" 
+                    className="flex-1 bg-fuchsia-600 hover:bg-fuchsia-500 text-white font-bold py-4 rounded-2xl transition-all shadow-[0_0_20px_rgba(217,70,239,0.3)]"
+                  >
+                    Authorize Sync
                   </button>
                 </div>
               </form>

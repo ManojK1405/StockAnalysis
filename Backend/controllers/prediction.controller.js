@@ -36,7 +36,17 @@ export const getStockPrediction = async (req, res) => {
   console.log(`--- Fetching Fresh Analysis for: ${symbol} ---`);
 
   try {
-    // 1. Fetch Historical Data (2 years for better chart zooming)
+    // 1. Fetch Company Metadata & Institutional Quote
+    console.log(`Fetching metadata for ${symbol}...`);
+    const quote = await yahooFinance.quote(symbol).catch(err => {
+       console.error("Yahoo Quote Error:", err.message);
+       return null;
+    });
+
+    const companyName = quote?.longName || symbol;
+    const sector = quote?.sector || quote?.industry || null;
+
+    // 2. Fetch Historical Data (2 years for better chart zooming)
     const endDate = new Date();
     const startDate = new Date();
     startDate.setDate(endDate.getDate() - 730);
@@ -63,9 +73,9 @@ export const getStockPrediction = async (req, res) => {
       return res.status(404).json({ error: 'Not enough historical data found for analysis.' });
     }
 
-    // 2. Fetch Real News & Sentiment
-    console.log(`Fetching news for ${symbol}...`);
-    const news = await fetchStockNews(symbol).catch(err => {
+    // 3. Fetch Precise News & Sentiment (Sector-aware)
+    console.log(`Fetching targeted news for ${companyName} (${sector || 'General'})...`);
+    const news = await fetchStockNews(symbol, companyName, sector).catch(err => {
       console.error("News Fetch Error:", err.message);
       return [];
     });
@@ -85,7 +95,7 @@ export const getStockPrediction = async (req, res) => {
 
     // 4. Get AI Reasoning for the signals
     console.log(`Getting Gemini reasoning...`);
-    const aiReasoningStr = await getAIPredictionReasoning(symbol, analysis.indicators, sentiment).catch(err => {
+    const aiReasoningStr = await getAIPredictionReasoning(symbol, analysis.indicators, sentiment, analysis.trendAnalysis).catch(err => {
        console.error("Gemini Reasoning Error:", err.message);
        return "Market analysis suggests following current trends.";
     });
@@ -93,16 +103,10 @@ export const getStockPrediction = async (req, res) => {
     const aiReasoningList = aiReasoningStr.split('\n').filter(r => r.trim()).map(r => r.replace(/^[*-]\s*/, ''));
     analysis.reasoning = [...new Set([...analysis.reasoning, ...aiReasoningList])];
 
-    // 5. Fetch Real-time Quote
-    console.log(`Fetching real-time quote for ${symbol}...`);
-    const quote = await yahooFinance.quote(symbol).catch(err => {
-       console.error("Yahoo Quote Error:", err.message);
-       return null;
-    });
-
     if (quote) {
       analysis.currentPrice = quote.regularMarketPrice || analysis.currentPrice;
-      analysis.name = quote.longName || symbol;
+      analysis.name = companyName;
+      analysis.sector = sector;
       analysis.fundamentals = {
         marketCap: quote.marketCap || 0,
         peRatio: quote.trailingPE || quote.forwardPE || 0,
@@ -122,7 +126,9 @@ export const getStockPrediction = async (req, res) => {
         marketCap: quote?.marketCap || 0,
         peRatio: quote?.trailingPE || quote?.forwardPE || 0,
         dividendYield: quote?.dividendYield || 0,
-        beta: quote?.beta || 0
+        beta: quote?.beta || 0,
+        eps: quote?.trailingEps || 0,
+        marketState: quote?.marketState || 'N/A'
       }
     };
 

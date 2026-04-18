@@ -2,14 +2,26 @@ import YahooFinance from 'yahoo-finance2';
 import { getAIStrategy, getNewsSentiment } from '../utils/gemini.js';
 import { fetchStockNews } from '../utils/news.js';
 import * as TI from 'technicalindicators';
+import { PrismaClient } from '@prisma/client';
 import dotenv from 'dotenv';
+
+const prisma = new PrismaClient();
 
 dotenv.config();
 
 const yahooFinance = new YahooFinance();
 
 async function getDynamicSymbols(sector, count = 8) {
-  const prompt = `You are a financial data expert. Provide exactly ${count} active Yahoo Finance ticker symbols for highly liquid Indian stocks in the ${sector === 'any' ? 'broad market' : sector} sector. Return ONLY a valid JSON array of strings (e.g. ["RELIANCE.NS"]). No syntax highlighting, no extra text.`;
+  const prompt = `
+    Persona: Senior Quantitative Strategist.
+    Objective: Identify exactly ${count} highly liquid, institutional-grade equity tickers for the Indian market (NSE) within the "${sector}" sector.
+    
+    Requirements:
+    - Symbols must be valid for Yahoo Finance (e.g., RELIANCE.NS, INFV.NS).
+    - Prioritize Large-cap and Mid-cap "Blue Chip" stocks with high daily volume.
+    - Return ONLY a raw JSON array of strings. 
+    - Output must be valid JSON: ["SYMBOL1.NS", "SYMBOL2.NS", ...]
+  `;
   try {
     const raw = await getAIStrategy(prompt);
     const parsed = JSON.parse(raw);
@@ -114,7 +126,7 @@ export const generateStrategy = async (req, res) => {
     return res.status(503).json({ error: 'Unable to fetch market data. Try again shortly.' });
   }
 
-  const horizonText = horizon === 'short' ? '3-6 months' : horizon === 'long' ? '3-5 years' : '1-2 years';
+  const horizonText = `${horizon} Year${horizon > 1 ? 's' : ''}`;
   const riskScore = riskLevel === 'conservative' ? 'Low' : riskLevel === 'aggressive' ? 'High' : 'Moderate';
 
   // Compact market context (fewer tokens)
@@ -124,12 +136,49 @@ export const generateStrategy = async (req, res) => {
     ...topStocks.map(s => `${s.symbol}|${s.name}|P:${s.price?.toFixed(0)}|30d:${s.returnPct}%|V:${s.volumeTrend}|PE:${s.pe?.toFixed(1) ?? 'N/A'}`),
   ].join('\n');
 
-  const prompt = `You are an Indian equity strategist. Generate a JSON investment strategy.
-Client: amount=Rs${investAmount}, risk=${riskLevel}, sector=${resolvedSector}, horizon=${horizonText}.
-Live data:\n${mktLines}
-Rules: Dynamically decide portfolio weights safely considering the risk level. Allocate the optimal amount into the listed stocks and allocate the rest intelligently into debt/gold/cash equivalents. Total weights must sum to 100%. Cite real numbers in reasons.
-Return ONLY valid JSON, no markdown, no extra text:
-{"strategyTitle":"","summary":"","riskScore":"${riskScore}","projectedReturnRange":"","horizon":"${horizonText}","allocation":[{"name":"","displayName":"","type":"stock","weight":0,"amount":0,"reason":"","risk":"Low"}],"marketOutlook":"","keyRisks":["","",""],"rebalanceAdvice":""}`;
+  const prompt = `
+    Act as the Chief Investment Officer (CIO) of a boutique Indian wealth management firm. 
+    Construct a sophisticated "Institutional Alpha Portfolio" based on the following parameters:
+    
+    Client Profile:
+    - Principal: ₹${investAmount}
+    - Risk Mandate: ${riskLevel}
+    - Sector Focus: ${resolvedSector}
+    - Time Horizon: ${horizonText}
+    
+    Market Intelligence Feed:
+    ${mktLines}
+    
+    Architectural Rules:
+    1. Capital Allocation: Dynamically weight assets to maximize risk-adjusted returns (Sharpe optimization).
+    2. Diversity: Include a mix of the provided high-momentum stocks and defensive hedges (Gold/Debt/Liquidity).
+    3. Mandatory Specificity: For Debt and Gold, NEVER use generic names (e.g., "Indian Debt Fund", "Gold ETF"). You MUST provide actual, real Indian ETFs or Mutual Funds (e.g., "Nippon India ETF Gold BeES (GOLDBEES.NS)", "ICICI Prudential Liquid Fund", "SBI Magnum Gilt Fund").
+    4. Reasoning: Provide sharp, institutional-grade justifications for each pick (e.g., mention mean reversion, relative strength, or fundamental valuation).
+    5. Compliance: Total weights must equal exactly 100%.
+    
+    Constraint: Return ONLY valid JSON in the structure below. No discourse.
+    {
+      "strategyTitle": "String",
+      "summary": "High-level architectural summary",
+      "riskScore": "${riskScore}",
+      "projectedReturnRange": "Estimate in %", 
+      "horizon": "${horizonText}",
+      "allocation": [
+        {
+          "name": "Ticker or Asset",
+          "displayName": "Full Name",
+          "type": "stock | debt | gold | cash",
+          "weight": number,
+          "amount": number,
+          "reason": "Institutional rationale",
+          "risk": "Low | Moderate | High"
+        }
+      ],
+      "marketOutlook": "Macro-level technical projection",
+      "keyRisks": ["Risk1", "Risk2", "Risk3"],
+      "rebalanceAdvice": "Quarterly/Tactical guidance"
+    }
+  `;
 
   try {
     const raw = await getAIStrategy(prompt);
@@ -328,3 +377,142 @@ export const generateIntradayPulse = async (req, res) => {
     res.status(500).json({ error: 'Intraday pulse generation failed. Please try again later.' });
   }
 };
+
+/**
+ * Reverse Strategy: Goal-based financial planning with inflation and price-hike projection.
+ */
+export const generateReverseStrategy = async (req, res) => {
+  const { goalQuery } = req.body;
+  
+  if (!goalQuery) {
+    return res.status(400).json({ error: 'Goal query is required (e.g., "Buy a Ducati in 6 years").' });
+  }
+
+  console.log(`[Reverse Strategy] Goal: ${goalQuery}`);
+
+  try {
+    // 1. Resolve some high-liquidity symbols for the "Growth" part of the portfolio
+    let symbols;
+    try {
+      symbols = await getDynamicSymbols('broad market', 10);
+    } catch {
+      symbols = ['RELIANCE.NS', 'TCS.NS', 'HDFCBANK.NS', 'INFY.NS', 'ICICIBANK.NS'];
+    }
+
+    // 2. Sample current momentum for realistic return expectations
+    const momentumData = await Promise.all(symbols.map(fetchMomentum));
+    const mktContext = momentumData
+      .filter(Boolean)
+      .map(d => `${d.symbol}|30d:${d.returnPct}%|Price:₹${d.currentPrice.toFixed(0)}`)
+      .join('\n');
+
+    const prompt = `
+      Persona: Senior Wealth Architect & Inflation Specialist.
+      Objective: Blueprint a multi-year acquisition strategy for a specific luxury/life goal.
+      
+      User Intent: "${goalQuery}"
+      Current Market Intelligence:
+      ${mktContext}
+      
+      Structural Requirements:
+      1. Identification: Resolve the specific acquisition target and the client's timeline (in years).
+      2. Valuation: Estimate the CURRENT market price of the goal in Indian Rupees (INR).
+      3. Future Value (FV): Project the FUTURE cost by applying a 6% annual baseline inflation rate AND a tactical 2.5% annual manufacturer price-hike factor (compounded annually).
+      4. Capital commitment: Calculate the required Monthly SIP (Systematic Investment Plan) needed to reach the FV, assuming a balanced 12.5% annual return on the portfolio.
+      5. Execution mix: Provide a specific asset allocation involving the provided tickers (Growth), Debt (Stability), and Gold (Hedge).
+      6. Mandatory Specificity: For Debt and Gold, NEVER use generic names (e.g., "Indian Debt Fund", "Gold ETF") in the "assets" string. You MUST provide actual, real Indian ETFs or Mutual Funds (e.g., "Nippon India ETF Gold BeES (GOLDBEES.NS)", "ICICI Prudential Liquid Fund", "SBI Magnum Gilt Fund").
+      
+      Output Format: Return ONLY valid JSON:
+      {
+        "goalTitle": "String",
+        "timeframeYears": number,
+        "currentValuation": number,
+        "futureValuation": number,
+        "monthlySIP": number,
+        "allocation": [
+           { "type": "Stock | Debt | Gold | Cash", "assets": "String of examples", "percentage": number, "logic": "Institutional rationale" }
+        ],
+        "assumedAnnualReturn": 12.5,
+        "compoundedInflation": "8.5% total annual factor",
+        "feasibilityScore": number (1-100),
+        "architectAdvice": "Director-level advisory note"
+      }
+    `;
+
+    const raw = await getAIStrategy(prompt);
+    const parsed = JSON.parse(raw);
+    
+    // Final post-processing for precision
+    const fullResult = {
+      ...parsed,
+      generatedAt: new Date().toISOString(),
+      marketClarity: "Incorporated latest volatility clusters and inflation modeling."
+    };
+
+    res.json(fullResult);
+  } catch (error) {
+    console.error('[Reverse Strategy] Architectural Failure:', error.message);
+    res.status(500).json({ error: 'Strategic blueprint failed. Please refine your goal query.' });
+  }
+};
+
+export const saveStrategy = async (req, res) => {
+  try {
+    const { name, description, strategyData, isPublic } = req.body;
+    const item = await prisma.savedStrategy.create({
+      data: {
+        userId: req.userId,
+        name: name || 'Untitled Strategy',
+        description,
+        strategyData,
+        isPublic: isPublic || false
+      }
+    });
+    res.json(item);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Failed to save strategy' });
+  }
+};
+
+export const getSavedStrategies = async (req, res) => {
+  try {
+    const strategies = await prisma.savedStrategy.findMany({
+      where: { userId: req.userId },
+      orderBy: { createdAt: 'desc' }
+    });
+    res.json(strategies);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Failed to fetch saved strategies' });
+  }
+};
+
+export const deleteStrategy = async (req, res) => {
+  try {
+    const { id } = req.params;
+    await prisma.savedStrategy.delete({
+      where: { id, userId: req.userId }
+    });
+    res.json({ message: 'Strategy deleted successfully' });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Failed to delete strategy' });
+  }
+};
+
+export const updateStrategy = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, description, strategyData, isPublic } = req.body;
+    const item = await prisma.savedStrategy.update({
+      where: { id, userId: req.userId },
+      data: { name, description, strategyData, isPublic }
+    });
+    res.json(item);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Failed to update strategy' });
+  }
+};
+

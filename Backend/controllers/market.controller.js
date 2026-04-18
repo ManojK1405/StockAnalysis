@@ -39,18 +39,18 @@ export const getMarketSummary = async (req, res) => {
             price: q.regularMarketPrice || 0,
             change: q.regularMarketChange || 0,
             changePercent: q.regularMarketChangePercent || 0,
-        })).sort((a,b) => Math.abs(b.changePercent) - Math.abs(a.changePercent));
+        })).sort((a, b) => Math.abs(b.changePercent) - Math.abs(a.changePercent));
 
         let topNews = [];
         if (trending.length > 0) {
-             const topStock = trending[0].symbol;
-             const searchRes = await yahooFinance.search(topStock, { newsCount: 5 }).catch(() => ({ news: [] }));
-             topNews = (searchRes.news || []).map(n => ({
-                 title: n.title,
-                 link: n.link,
-                 publisher: n.publisher,
-                 content: n.providerPublishTime ? new Date(n.providerPublishTime * 1000).toLocaleDateString() : 'Recent'
-             }));
+            const topStock = trending[0].symbol;
+            const searchRes = await yahooFinance.search(topStock, { newsCount: 5 }).catch(() => ({ news: [] }));
+            topNews = (searchRes.news || []).map(n => ({
+                title: n.title,
+                link: n.link,
+                publisher: n.publisher,
+                content: n.providerPublishTime ? new Date(n.providerPublishTime * 1000).toLocaleDateString() : 'Recent'
+            }));
         }
 
         const final = { pulse: result, trending, topNews };
