@@ -5,33 +5,94 @@ dotenv.config();
 
 export const fetchStockNews = async (symbol, name, sector) => {
     const apiKey = process.env.NEWS_API_KEY;
-    if (!apiKey) return [];
+    const cleanSymbol = symbol.split('.')[0];
+    const isIndian = symbol.endsWith('.NS') || symbol.endsWith('.BO');
+    
+    // Define common synonyms for major Indian stocks to improve matching
+    const synonyms = {
+        'SBIN': 'SBI',
+        'RELIANCE': 'Reliance',
+        'TCS': 'Tata Consultancy',
+        'HDFCBANK': 'HDFC Bank',
+        'INFY': 'Infosys'
+    },
+    extraTerm = synonyms[cleanSymbol] || '';
 
-    try {
-        const cleanSymbol = symbol.split('.')[0];
-        // Create a precise query including company name, ticker, and sector
-        const sectorClause = sector ? ` OR "${sector}" industry` : '';
-        const searchQuery = `("${name}" OR "${cleanSymbol}") AND (stock OR earnings OR performance OR market)${sectorClause}`;
-        
-        const response = await axios.get(`https://newsapi.org/v2/everything`, {
-            params: {
-                q: searchQuery,
-                sortBy: 'relevancy', // Changed from publishedAt for better precision
-                language: 'en',
-                pageSize: 12,
-                apiKey: apiKey
-            }
-        });
-
-        return response.data.articles.map(art => ({
-            title: art.title,
-            description: art.description,
-            url: art.url,
-            source: art.source.name,
-            publishedAt: art.publishedAt
-        }));
-    } catch (error) {
-        console.error("NewsAPI Error:", error.response?.data || error.message);
-        return [];
+    // 1. Fetch from NewsAPI (Everything endpoint)
+    const newsApiArticles = [];
+    if (apiKey) {
+        try {
+            const marketContext = isIndian ? ' (India OR NSE OR BSE)' : '';
+            const query = `("${name}"${extraTerm ? ` OR "${extraTerm}"` : ''} OR "${cleanSymbol}") AND (stock OR shares OR profit OR earnings OR market)${marketContext}`;
+            
+            const resp = await axios.get(`https://newsapi.org/v2/everything`, {
+                params: {
+                    q: query,
+                    searchIn: 'title,description',
+                    sortBy: 'relevancy',
+                    language: 'en',
+                    pageSize: 20,
+                    apiKey: apiKey
+                }
+            });
+            newsApiArticles.push(...(resp.data.articles || []));
+        } catch (e) {
+            console.error("NewsAPI Error:", e.message);
+        }
     }
+
+    // 2. Fetch from Yahoo Finance (Search endpoint)
+    const yahooArticles = [];
+    try {
+        const YahooFinance = (await import('yahoo-finance2')).default;
+        const yf = new YahooFinance({ suppressNotices: ['yahooSurvey'], validation: { logErrors: false } });
+        const yfResult = await yf.search(symbol);
+        if (yfResult.news) {
+            yahooArticles.push(...yfResult.news);
+        }
+    } catch (e) {
+        console.error("Yahoo News Error:", e.message);
+    }
+
+    // 3. Map both to a unified format
+    const unified = [
+        ...newsApiArticles.map(a => ({
+            title: a.title,
+            description: a.description,
+            url: a.url,
+            source: a.source.name,
+            publishedAt: a.publishedAt
+        })),
+        ...yahooArticles.map(a => ({
+            title: a.title,
+            description: '',
+            url: a.link,
+            source: a.publisher || 'Yahoo Finance',
+            publishedAt: a.providerPublishTime ? new Date(a.providerPublishTime * 1000).toISOString() : new Date().toISOString()
+        }))
+    ];
+
+    // 4. Filter & Deduplicate
+    const seenTitles = new Set();
+    const final = unified.filter(art => {
+        if (!art.title || art.title.length < 10) return false;
+        
+        const lowTitle = art.title.toLowerCase();
+        // Simple deduplication based on title similarity (first 30 chars)
+        const partialTitle = lowTitle.substring(0, 40);
+        if (seenTitles.has(partialTitle)) return false;
+        seenTitles.add(partialTitle);
+
+        // Noise gate for MRF/Recycling
+        if ((cleanSymbol === 'MRF') && (lowTitle.includes('waste') || lowTitle.includes('recycl'))) return false;
+
+        // Ensure relevance: Must mention part of the name, ticker, or synonym
+        const n = name.toLowerCase();
+        const s = cleanSymbol.toLowerCase();
+        const e = extraTerm.toLowerCase();
+        
+        return lowTitle.includes(n) || lowTitle.includes(s) || (e && lowTitle.includes(e)) || (sector && lowTitle.includes(sector.toLowerCase()));
+    });
+
+    return final.sort((a, b) => new Date(b.publishedAt) - new Date(a.publishedAt)).slice(0, 15);
 };

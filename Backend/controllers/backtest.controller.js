@@ -1,7 +1,10 @@
 import YahooFinance from 'yahoo-finance2';
 import { analyzeStock } from '../utils/analysis.js';
 
-const yahooFinance = new YahooFinance();
+const yahooFinance = new YahooFinance({ 
+    suppressNotices: ['yahooSurvey'],
+    validation: { logErrors: false }
+});
 
 export const runBacktest = async (req, res) => {
     try {

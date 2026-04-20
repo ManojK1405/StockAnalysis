@@ -28,5 +28,8 @@ export const updateSavedStrategy = (id, payload) => API.put(`/strategy/saved/${i
 
 export const syncBroker = (payload) => API.post('/portfolio/broker-sync', payload);
 export const executeStrategy = (payload) => API.post('/portfolio/execute-strategy', payload);
+export const getTradeQueue = () => API.get('/portfolio/queue');
+export const retryTrade = (id) => API.post(`/portfolio/queue/retry/${id}`);
+export const dismissTrade = (id) => API.delete(`/portfolio/queue/${id}`);
 
 export default API;

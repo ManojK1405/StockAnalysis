@@ -551,6 +551,9 @@ const Dashboard = () => {
                           </div>
                           <div className="flex items-center gap-3 mt-3">
                              <span className="text-[10px] uppercase font-bold tracking-widest text-slate-500 bg-white/5 px-2 py-1 rounded-md">{item.source || 'Market Feed'}</span>
+                             <span className="text-[10px] font-bold text-slate-600">
+                               {item.publishedAt ? new Date(item.publishedAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : ''}
+                             </span>
                           </div>
                         </a>
                       ))

@@ -9,7 +9,10 @@ const prisma = new PrismaClient();
 
 dotenv.config();
 
-const yahooFinance = new YahooFinance();
+const yahooFinance = new YahooFinance({ 
+    suppressNotices: ['yahooSurvey'],
+    validation: { logErrors: false }
+});
 
 async function getDynamicSymbols(sector, count = 8) {
   const prompt = `
@@ -150,33 +153,34 @@ export const generateStrategy = async (req, res) => {
     ${mktLines}
     
     Architectural Rules:
-    1. Capital Allocation: Dynamically weight assets to maximize risk-adjusted returns (Sharpe optimization).
-    2. Diversity: Include a mix of the provided high-momentum stocks and defensive hedges (Gold/Debt/Liquidity).
-    3. Mandatory Specificity: For Debt and Gold, NEVER use generic names (e.g., "Indian Debt Fund", "Gold ETF"). You MUST provide actual, real Indian ETFs or Mutual Funds (e.g., "Nippon India ETF Gold BeES (GOLDBEES.NS)", "ICICI Prudential Liquid Fund", "SBI Magnum Gilt Fund").
-    4. Reasoning: Provide sharp, institutional-grade justifications for each pick (e.g., mention mean reversion, relative strength, or fundamental valuation).
-    5. Compliance: Total weights must equal exactly 100%.
+    1. Capital Allocation: Dynamically weight assets. For smaller amounts (e.g. < ₹50,000), strictly limit to 3-5 high-conviction picks to prevent over-diversification.
+    2. Diversity: Include a mix of high-momentum stocks and defensive hedges.
+    3. Mandatory Specificity: For Debt and Gold, NEVER use generic names. Use real Indian ETFs (e.g., "GOLDBEES.NS", "LIQUIDBEES.NS", etc.)
+    4. Granularity: Ensure no single stock is weighted below 10% of the total portfolio.
+    5. Unit-Awareness: The "amount" allocated to a stock MUST be enough to buy at least 1 or 2 full shares based on the provided current price. If ₹${investAmount} is too small for a specific stock (e.g. MRF, Maruti), DO NOT recommend it; suggest a lower-priced alternative or a Nifty ETF (NIFTYBEES.NS) instead.
+    6. Compliance: Total weights must equal exactly 100%. Total amounts must sum to ₹${investAmount}.
     
-    Constraint: Return ONLY valid JSON in the structure below. No discourse.
+    Constraint: Return ONLY valid JSON.
     {
       "strategyTitle": "String",
-      "summary": "High-level architectural summary",
+      "summary": "High-level summary",
       "riskScore": "${riskScore}",
-      "projectedReturnRange": "Estimate in %", 
+      "projectedReturnRange": "% range", 
       "horizon": "${horizonText}",
       "allocation": [
         {
-          "name": "Ticker or Asset",
+          "name": "Ticker (Symbol.NS / Symbol.BO)",
           "displayName": "Full Name",
           "type": "stock | debt | gold | cash",
           "weight": number,
           "amount": number,
-          "reason": "Institutional rationale",
+          "reason": "Rationale",
           "risk": "Low | Moderate | High"
         }
       ],
-      "marketOutlook": "Macro-level technical projection",
-      "keyRisks": ["Risk1", "Risk2", "Risk3"],
-      "rebalanceAdvice": "Quarterly/Tactical guidance"
+      "marketOutlook": "Macro projection",
+      "keyRisks": ["Risk1"],
+      "rebalanceAdvice": "Advice"
     }
   `;
 
@@ -461,10 +465,10 @@ export const saveStrategy = async (req, res) => {
     const { name, description, strategyData, isPublic } = req.body;
     const item = await prisma.savedStrategy.create({
       data: {
-        userId: req.userId,
+        user: { connect: { id: req.userId } },
         name: name || 'Untitled Strategy',
         description,
-        strategyData,
+        data: strategyData,
         isPublic: isPublic || false
       }
     });
@@ -507,7 +511,7 @@ export const updateStrategy = async (req, res) => {
     const { name, description, strategyData, isPublic } = req.body;
     const item = await prisma.savedStrategy.update({
       where: { id, userId: req.userId },
-      data: { name, description, strategyData, isPublic }
+      data: { name, description, data: strategyData, isPublic }
     });
     res.json(item);
   } catch (error) {

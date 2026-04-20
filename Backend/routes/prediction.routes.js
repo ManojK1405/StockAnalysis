@@ -8,7 +8,7 @@ const router = express.Router();
 router.get('/market-status', async (req, res) => {
     try {
         const YahooFinance = (await import('yahoo-finance2')).default;
-        const yf = new YahooFinance();
+        const yf = new YahooFinance({ suppressNotices: ['yahooSurvey'], validation: { logErrors: false } });
         // Check NIFTY 50 index for Indian market status
         const quote = await yf.quote('^NSEI').catch(() => null);
         const state = quote?.marketState || 'CLOSED';
@@ -39,7 +39,7 @@ router.get('/search/:query', async (req, res) => {
     try {
         const { query } = req.params;
         const YahooFinance = (await import('yahoo-finance2')).default;
-        const yf = new YahooFinance();
+        const yf = new YahooFinance({ suppressNotices: ['yahooSurvey'], validation: { logErrors: false } });
         const results = await yf.search(query);
         
         // Filter for relevant Indian stocks or major globals

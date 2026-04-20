@@ -2,6 +2,9 @@ import React, { useState, useEffect } from 'react';
 import { LayoutDashboard, TrendingUp, Plus, Trash2, ArrowUpRight, ArrowDownRight, Briefcase, Bookmark, Activity } from 'lucide-react';
 import * as api from '../api';
 import { motion, AnimatePresence } from 'framer-motion';
+import { io } from 'socket.io-client';
+
+const SOCKET_URL = 'http://localhost:5001';
 
 const Portfolio = () => {
   const [watchlist, setWatchlist] = useState([]);
@@ -11,17 +14,21 @@ const Portfolio = () => {
   const [showBrokerModal, setShowBrokerModal] = useState(false);
   const [selectedBroker, setSelectedBroker] = useState('zerodha');
   const [brokerKey, setBrokerKey] = useState('');
+  const [brokerSecret, setBrokerSecret] = useState('');
   const [isBrokerConnected, setIsBrokerConnected] = useState(false);
   const [newItem, setNewItem] = useState({ symbol: '', quantity: '', avgPrice: '' });
+  const [tradeQueue, setTradeQueue] = useState([]);
 
   const fetchData = async () => {
     try {
-      const [watchlistRes, portfolioRes] = await Promise.all([
+      const [watchlistRes, portfolioRes, queueRes] = await Promise.all([
         api.getWatchlist(),
-        api.getPortfolio()
+        api.getPortfolio(),
+        api.getTradeQueue()
       ]);
       setWatchlist(watchlistRes.data);
       setPortfolio(portfolioRes.data);
+      setTradeQueue(queueRes.data);
     } catch (error) {
       console.error('Error fetching data:', error);
     } finally {
@@ -31,7 +38,47 @@ const Portfolio = () => {
 
   useEffect(() => {
     fetchData();
+
+    // WebSocket Setup
+    const socket = io(SOCKET_URL);
+    
+    socket.on('connect', () => {
+      console.log('Connected to Market Ticker');
+    });
+
+    socket.on('price_update', (data) => {
+      // Update Portfolio
+      setPortfolio(prev => prev.map(item => {
+        if (item.stock.symbol === data.symbol) {
+          return { ...item, currentPrice: data.price, change: data.change };
+        }
+        return item;
+      }));
+      
+      // Update Watchlist
+      setWatchlist(prev => prev.map(item => {
+        if (item.stock.symbol === data.symbol) {
+          return { ...item, currentPrice: data.price, change: data.change };
+        }
+        return item;
+      }));
+    });
+
+    return () => socket.disconnect();
   }, []);
+
+  // Subscribe to symbols whenever portfolio or watchlist changes
+  useEffect(() => {
+    const symbols = [
+      ...portfolio.map(i => i.stock.symbol),
+      ...watchlist.map(i => i.stock.symbol)
+    ];
+    if (symbols.length > 0) {
+      const socket = io(SOCKET_URL);
+      socket.emit('subscribe', symbols);
+      return () => socket.disconnect();
+    }
+  }, [portfolio.length, watchlist.length]);
 
   const handleAddPortfolio = async (e) => {
     e.preventDefault();
@@ -58,11 +105,14 @@ const Portfolio = () => {
     
     try {
       await api.syncBroker({
-        brokerName: selectedBroker,
-        apiKey: brokerKey
+        apiKey: brokerKey,
+        apiSecret: selectedBroker === 'groww' ? brokerSecret : null,
+        brokerType: selectedBroker
       });
       setIsBrokerConnected(true);
       localStorage.setItem('broker_api_key', brokerKey);
+      if (selectedBroker === 'groww') localStorage.setItem('broker_api_secret', brokerSecret);
+      localStorage.setItem('broker_type', selectedBroker);
       await fetchData();
     } catch (err) {
       console.error(err);
@@ -90,6 +140,24 @@ const Portfolio = () => {
     const pnl = totalCurrent - totalInvested;
     const pnlPercent = totalInvested > 0 ? (pnl / totalInvested) * 100 : 0;
     return { pnl, pnlPercent, totalCurrent };
+  };
+
+  const handleRetryTrade = async (id) => {
+    try {
+      await api.retryTrade(id);
+      fetchData();
+    } catch (err) {
+      console.error('Retry error:', err);
+    }
+  };
+
+  const handleDismissTrade = async (id) => {
+    try {
+      await api.dismissTrade(id);
+      fetchData();
+    } catch (err) {
+      console.error('Dismiss error:', err);
+    }
   };
 
   const { pnl: totalPnL, pnlPercent: totalPnLPercent, totalCurrent } = calculateTotalPnL();
@@ -226,6 +294,61 @@ const Portfolio = () => {
                 </div>
               </div>
             </div>
+
+            {/* Dead Letter Queue (Failed Trades) */}
+            {tradeQueue.filter(t => t.status === 'FAILED').length > 0 && (
+              <div className="lg:col-span-8 space-y-6">
+                <div className="bg-rose-500/5 border border-rose-500/20 rounded-[32px] p-8 shadow-2xl">
+                  <div className="flex items-center gap-3 mb-6 pb-4 border-b border-rose-500/10">
+                    <Activity className="w-5 h-5 text-rose-400" />
+                    <h2 className="text-xl font-black text-white">Execution Failures (DLQ)</h2>
+                  </div>
+                  
+                  <div className="space-y-4">
+                    {tradeQueue.filter(t => t.status === 'FAILED').map(item => (
+                      <div key={item.id} className="bg-black/40 border border-rose-500/10 rounded-2xl p-5 flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-3 mb-2">
+                             <span className="px-2 py-1 bg-rose-500/10 text-rose-400 text-[10px] font-black rounded uppercase tracking-widest border border-rose-500/20">Failure</span>
+                             <span className="text-sm font-bold text-white uppercase tracking-wide">
+                               {(item.trades?.[0]?.symbol || 'Complex Strategy').split('.')[0]} Strategy
+                             </span>
+                             <span className="text-[10px] text-slate-500 font-bold">
+                               {new Date(item.updatedAt).toLocaleString()}
+                             </span>
+                          </div>
+                          <p className="text-xs text-rose-400/80 font-medium leading-relaxed max-w-xl">
+                            {(() => {
+                              try {
+                                const errs = JSON.parse(item.error);
+                                return Array.isArray(errs) ? errs.map(e => `${e.symbol}: ${e.error}`).join(' | ') : item.error;
+                              } catch {
+                                return item.error || 'Unknown execution failure';
+                              }
+                            })()}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-3 w-full md:w-auto">
+                          <button 
+                            onClick={() => handleRetryTrade(item.id)}
+                            className="bg-emerald-600 hover:bg-emerald-500 text-white px-5 py-2.5 rounded-xl font-bold text-xs transition-all shadow-lg flex-1 md:flex-none"
+                          >
+                            Re-Queue
+                          </button>
+                          <button 
+                            onClick={() => handleDismissTrade(item.id)}
+                            className="bg-white/5 hover:bg-rose-500/10 border border-white/10 hover:border-rose-500/20 text-slate-400 hover:text-rose-400 p-2.5 rounded-xl transition-all"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+
 
             {/* Watchlist Section */}
             <div className="lg:col-span-4 space-y-6">
@@ -368,27 +491,52 @@ const Portfolio = () => {
               <form onSubmit={handleConnectBroker} className="space-y-6 relative z-10">
                 <div className="space-y-3">
                   <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Select Broker</label>
-                  <div className="grid grid-cols-1 gap-3">
+                  <div className="grid grid-cols-2 gap-3">
                      <div 
                        onClick={() => setSelectedBroker('zerodha')}
-                       className={`flex items-center justify-center gap-2 p-4 rounded-2xl border cursor-pointer transition-all bg-orange-500/10 border-orange-500/50 text-orange-400`}
+                       className={`flex items-center justify-center gap-2 p-4 rounded-2xl border cursor-pointer transition-all ${selectedBroker === 'zerodha' ? 'bg-orange-500/10 border-orange-500/50 text-orange-400' : 'bg-white/5 border-white/5 text-slate-500 hover:bg-white/10'}`}
                      >
-                        <strong className="text-sm">Zerodha Kite (Kite Connect API)</strong>
+                        <strong className="text-sm">Zerodha</strong>
+                     </div>
+                     <div 
+                       onClick={() => setSelectedBroker('groww')}
+                       className={`flex items-center justify-center gap-2 p-4 rounded-2xl border cursor-pointer transition-all ${selectedBroker === 'groww' ? 'bg-emerald-500/10 border-emerald-500/50 text-emerald-400' : 'bg-white/5 border-white/5 text-slate-500 hover:bg-white/10'}`}
+                     >
+                        <strong className="text-sm">Groww</strong>
                      </div>
                   </div>
                 </div>
 
-                <div className="space-y-2">
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">API Authentication Key</label>
-                  <input 
-                    type="password" 
-                    required
-                    placeholder="Enter your API Key..."
-                    className="w-full bg-black/50 border border-white/10 rounded-2xl py-4 px-5 focus:outline-none focus:border-fuchsia-500/50 focus:ring-2 focus:ring-fuchsia-500/20 transition-all text-sm font-bold text-white placeholder:text-slate-600"
-                    value={brokerKey}
-                    onChange={(e) => setBrokerKey(e.target.value)}
-                  />
-                  <p className="text-[10px] text-slate-500 mt-2 ml-1">Keys are encrypted end-to-end and purely used for read-only sync operations.</p>
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">
+                      {selectedBroker === 'zerodha' ? 'API Key / Access Token' : 'Groww API Key'}
+                    </label>
+                    <input 
+                      type="password" 
+                      required
+                      placeholder={`Enter your ${selectedBroker === 'zerodha' ? 'Kite Access Token' : 'Groww API Key'}...`}
+                      className="w-full bg-black/50 border border-white/10 rounded-2xl py-4 px-5 focus:outline-none focus:border-fuchsia-500/50 focus:ring-2 focus:ring-fuchsia-500/20 transition-all text-sm font-bold text-white placeholder:text-slate-600"
+                      value={brokerKey}
+                      onChange={(e) => setBrokerKey(e.target.value)}
+                    />
+                  </div>
+
+                  {selectedBroker === 'groww' && (
+                    <div className="space-y-2">
+                       <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Groww API Secret</label>
+                       <input 
+                         type="password" 
+                         required
+                         placeholder="Enter your Groww API Secret..."
+                         className="w-full bg-black/50 border border-white/10 rounded-2xl py-4 px-5 focus:outline-none focus:border-emerald-500/50 focus:ring-2 focus:ring-emerald-500/20 transition-all text-sm font-bold text-white placeholder:text-slate-600"
+                         value={brokerSecret}
+                         onChange={(e) => setBrokerSecret(e.target.value)}
+                       />
+                    </div>
+                  )}
+
+                  <p className="text-[10px] text-slate-500 mt-2 ml-1">Keys are encrypted and stored locally in your browser for secure trade execution.</p>
                 </div>
 
                 <div className="flex gap-4 mt-8">

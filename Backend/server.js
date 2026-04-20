@@ -3,6 +3,14 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import cron from 'node-cron';
 import { PrismaClient } from '@prisma/client';
+import { createServer } from 'http';
+import { Server } from 'socket.io';
+import YahooFinance from 'yahoo-finance2';
+
+const yahooFinance = new YahooFinance({ 
+    suppressNotices: ['yahooSurvey'],
+    validation: { logErrors: false }
+});
 
 // Import Routes
 import predictionRoutes from './routes/prediction.routes.js';
@@ -17,6 +25,11 @@ import strategyRoutes from './routes/strategy.routes.js';
 dotenv.config();
 
 const app = express();
+const httpServer = createServer(app);
+const io = new Server(httpServer, {
+  cors: { origin: "*", methods: ["GET", "POST"] }
+});
+
 const prisma = new PrismaClient();
 const PORT = process.env.PORT || 5001;
 
@@ -38,6 +51,18 @@ app.use('/api/alerts', alertRoutes);
 app.use('/api/strategy', strategyRoutes);
 
 // --- Background Jobs ---
+import { processPendingQueue } from './controllers/portfolio.controller.js';
+
+// Market hours check every 5 minutes
+cron.schedule('*/5 * * * *', async () => {
+  console.log('--- Checking Pending Trade Queue ---');
+  try {
+    await processPendingQueue();
+  } catch (error) {
+    console.error('Error in Trade Queue job:', error);
+  }
+});
+
 cron.schedule('*/30 * * * *', async () => {
   console.log('--- Running Background Stock & News Update ---');
   try {
@@ -47,6 +72,44 @@ cron.schedule('*/30 * * * *', async () => {
   }
 });
 
-app.listen(PORT, () => {
+// --- Real-time Price Ticker (WebSocket) ---
+io.on('connection', (socket) => {
+  console.log('Client connected to Live Ticker:', socket.id);
+  
+  socket.on('subscribe', async (symbols) => {
+    if (!Array.isArray(symbols)) return;
+    socket.join(symbols); // Join rooms for specific symbols
+    console.log(`Socket ${socket.id} subscribed to:`, symbols);
+  });
+
+  socket.on('disconnect', () => {
+    console.log('Client disconnected');
+  });
+});
+
+// Broadcast latest prices every 10 seconds
+cron.schedule('*/10 * * * * *', async () => {
+  const rooms = Array.from(io.sockets.adapter.rooms.keys());
+  const symbols = rooms.filter(r => r.includes('.NS') || r.includes('.BO'));
+  
+  if (symbols.length === 0) return;
+
+  try {
+     const quotes = await yahooFinance.quote(symbols);
+     const results = Array.isArray(quotes) ? quotes : [quotes];
+     
+     results.forEach(q => {
+        io.to(q.symbol).emit('price_update', {
+           symbol: q.symbol,
+           price: q.regularMarketPrice,
+           change: q.regularMarketChangePercent
+        });
+     });
+  } catch (err) {
+     // fail silently for backgrounds
+  }
+});
+
+httpServer.listen(PORT, () => {
   console.log(`Server is listening on port ${PORT} `);
 });

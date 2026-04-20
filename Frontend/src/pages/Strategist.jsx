@@ -3,7 +3,7 @@ import {
   Target, Wallet, TrendingUp, ShieldCheck, Briefcase, ChevronRight,
   Sparkles, RefreshCw, AlertTriangle, BarChart2, Clock, Layers,
   CheckCircle2, XCircle, ArrowRight, Globe2, Coins, Info,
-  Bookmark, Share2, Trash2, Edit
+  Bookmark, Share2, Trash2, Edit, Activity
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { generateStrategy, generateReverseStrategy, executeStrategy, saveStrategyAction, getSavedStrategies, deleteSavedStrategy, updateSavedStrategy } from '../api/index.js';
@@ -126,9 +126,34 @@ const Strategist = () => {
   // Saved Strategies Mode
   const [savedPlans, setSavedPlans] = useState([]);
   const [editingPlan, setEditingPlan] = useState(null);
+  const [saveSuccess, setSaveSuccess] = useState(false);
+  const [showSaveModal, setShowSaveModal] = useState(false);
+  const [tempStrategyName, setTempStrategyName] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
+  const [isEditingGoalPrice, setIsEditingGoalPrice] = useState(false);
+  const [goalPriceInput, setGoalPriceInput] = useState('');
 
   const formatINR = (n) =>
     new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(n);
+
+  const calculateFutureValue = (pv, returnStr, horizonStr) => {
+    try {
+      const amount = parseFloat(pv);
+      const years = parseInt(horizonStr.replace(/[^0-9]/g, '')) || 1;
+      
+      // Parse returnStr (e.g., "9-13% p.a.")
+      const matches = returnStr.match(/(\d+(\.\d+)?)/g);
+      if (!matches) return amount;
+      
+      const rate = matches.length > 1 
+        ? (parseFloat(matches[0]) + parseFloat(matches[1])) / 2 / 100 
+        : parseFloat(matches[0]) / 100;
+        
+      return amount * Math.pow(1 + rate, years);
+    } catch (e) {
+      return 0;
+    }
+  };
 
   const handleGenerate = async () => {
     if (!amount || !riskLevel) return;
@@ -166,6 +191,92 @@ const Strategist = () => {
      }
   };
 
+  const fetchSavedPlans = async () => {
+    setLoading(true);
+    try {
+      const resp = await getSavedStrategies();
+      setSavedPlans(resp.data);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSaveCurrent = (e) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    const defaultName = mode === 'standard' ? `Portfolio - ${amount}` : (reverseResult?.goalTitle || 'Goal Blueprint');
+    setTempStrategyName(defaultName);
+    setShowSaveModal(true);
+  };
+
+  const confirmSave = async () => {
+    const currentData = mode === 'standard' ? strategy : reverseResult;
+    if (!currentData || !tempStrategyName.trim()) return;
+
+    setIsSaving(true);
+    try {
+      await saveStrategyAction({
+        name: tempStrategyName,
+        strategyData: currentData,
+        description: mode === 'standard' ? `Risk: ${riskLevel}, Horizon: ${horizon}y` : `Goal Acquisition Blueprint`
+      });
+      setShowSaveModal(false);
+      setSaveSuccess(true);
+      setTimeout(() => setSaveSuccess(false), 3000);
+      if (mode === 'saved') fetchSavedPlans();
+    } catch (err) {
+      alert('Failed to save strategy.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleDelete = async (id) => {
+    if (!window.confirm("Delete this strategy from vault?")) return;
+    try {
+      await deleteSavedStrategy(id);
+      fetchSavedPlans();
+    } catch (err) {
+      alert("Failed to delete.");
+    }
+  };
+
+  const handleUpdateGoalPrice = () => {
+    if (!reverseResult || !goalPriceInput) return;
+    const newCurrent = parseFloat(goalPriceInput);
+    if (isNaN(newCurrent)) return;
+
+    // Recalculate
+    const years = reverseResult.timeframeYears || 1;
+    const months = years * 12;
+    const inflationStr = reverseResult.compoundedInflation || "8.5%";
+    const inflationRate = (parseFloat(inflationStr.match(/(\d+(\.\d+)?)/)?.[0]) || 8.5) / 100;
+    const expectedReturn = (reverseResult.assumedAnnualReturn || 12.5) / 100;
+    
+    const futureVal = newCurrent * Math.pow(1 + inflationRate, years);
+    
+    // SIP Formula: FV = P * [((1 + r)^n - 1) / r] * (1 + r)
+    // Monthly rate r
+    const r = expectedReturn / 12;
+    const sip = (futureVal * r) / ((Math.pow(1 + r, months) - 1) * (1 + r));
+
+    setReverseResult({
+      ...reverseResult,
+      currentValuation: newCurrent,
+      futureValuation: Math.round(futureVal),
+      monthlySIP: Math.round(sip)
+    });
+    setIsEditingGoalPrice(false);
+  };
+
+  React.useEffect(() => {
+    if (mode === 'saved') fetchSavedPlans();
+  }, [mode]);
+
   const reset = () => {
     setStep(1); setAmount(''); setRiskLevel('');
     setSector('any'); setHorizon(2); setGoalQuery('');
@@ -174,19 +285,22 @@ const Strategist = () => {
 
   const handleExecuteOrders = async (trades) => {
     const apiKey = localStorage.getItem('broker_api_key');
+    const apiSecret = localStorage.getItem('broker_api_secret');
+    const brokerType = localStorage.getItem('broker_type') || 'zerodha';
     if (!apiKey) {
-      alert("Please connect to your Zerodha account in the Portfolio Hub first!");
+      alert("Please connect to your stock broker in the Portfolio Hub first!");
       return;
     }
     
     // confirm with user
-    if (!window.confirm("Execute this entire strategy via live market orders on Zerodha?\n\nWARNING: Real money will be utilized!")) return;
+    const brokerLabel = brokerType === 'zerodha' ? 'Zerodha' : 'Groww';
+    if (!window.confirm(`Execute this entire strategy via live market orders on ${brokerLabel}?\n\nWARNING: Real money will be utilized!`)) return;
     
     setLoading(true);
     try {
        // Map 'name' to 'symbol' as the backend specifically looks for 'trade.symbol'
        const mappedTrades = trades.map(t => ({ ...t, symbol: t.name }));
-       const response = await executeStrategy({ apiKey, trades: mappedTrades });
+       const response = await executeStrategy({ apiKey, apiSecret, brokerType, trades: mappedTrades });
        alert(response.data.message + "\nCheck Portfolio Hub for statuses.");
     } catch(err) {
        alert(err.response?.data?.error || "Failed to execute. Order blocked by API.");
@@ -221,6 +335,7 @@ const Strategist = () => {
           {[
             { id: 'standard', label: 'Portfolio Strategy', emoji: '📊' },
             { id: 'reverse',  label: 'Goal Acquisition',  emoji: '🎯' },
+            { id: 'saved',    label: 'Vault',             emoji: '🔒' },
           ].map(m => (
             <button
               key={m.id}
@@ -543,7 +658,8 @@ const Strategist = () => {
                     { label: 'Total Invested', val: formatINR(strategy.inputParams?.amount || 0), icon: Wallet, color: '#6366f1' },
                     { label: 'Risk Level',     val: strategy.riskScore,    icon: ShieldCheck, color: RISK_COLOR[strategy.riskScore] || '#6366f1' },
                     { label: 'Target Return',  val: strategy.projectedReturnRange, icon: TrendingUp, color: '#10b981' },
-                    { label: 'Horizon',        val: strategy.horizon,      icon: Clock, color: '#f59e0b' },
+                    { label: 'Horizon',        val: strategy.horizon,      icon: Clock, color: '#a5b4fc' },
+                    { label: 'Future Value',   val: formatINR(calculateFutureValue(strategy.inputParams?.amount || 0, strategy.projectedReturnRange, strategy.horizon)), icon: Coins, color: '#f59e0b' },
                   ].map(({ label, val, icon: Icon, color }) => (
                     <div key={label} style={{
                       background: 'rgba(0,0,0,0.25)', borderRadius: 14, padding: '14px 16px',
@@ -685,8 +801,24 @@ const Strategist = () => {
 
               </div>
 
+              {/* Persistence Action */}
+              <button 
+                type="button"
+                onClick={(e) => handleSaveCurrent(e)}
+                style={{
+                  marginTop: 32, width: '100%', padding: '16px', borderRadius: 16, cursor: 'pointer',
+                  background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.3)',
+                  color: '#818cf8', fontSize: 14, fontWeight: 700,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                  transition: 'all 0.2s'
+                }}
+              >
+                <Bookmark size={18} /> Vault this Strategy for Later
+              </button>
+
               {/* Execution Execution Action */}
               <button 
+                type="button"
                 onClick={() => handleExecuteOrders(strategy.allocation)}
                 disabled={loading}
                 style={{
@@ -831,17 +963,44 @@ const Strategist = () => {
                 {/* KPI Strip */}
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 12, marginTop: 24 }}>
                   {[
-                    { label: 'Current Value', val: formatINR(reverseResult.currentValuation || 0), color: '#94a3b8' },
+                    { 
+                      label: 'Current Value', 
+                      val: isEditingGoalPrice ? (
+                        <div style={{ display: 'flex', gap: 4, marginTop: 4 }}>
+                          <input 
+                            autoFocus
+                            type="number"
+                            value={goalPriceInput}
+                            onChange={(e) => setGoalPriceInput(e.target.value)}
+                            onKeyDown={(e) => e.key === 'Enter' && handleUpdateGoalPrice()}
+                            style={{ width: '100%', background: 'rgba(255,255,255,0.05)', border: '1px solid #f59e0b', borderRadius: 8, color: '#fff', fontSize: 13, padding: '4px 8px' }}
+                          />
+                          <button onClick={handleUpdateGoalPrice} style={{ background: '#f59e0b', border: 'none', borderRadius: 6, color: '#000', padding: '0 8px', cursor: 'pointer' }}>✓</button>
+                        </div>
+                      ) : formatINR(reverseResult.currentValuation || 0), 
+                      color: isEditingGoalPrice ? '#fff' : '#94a3b8',
+                      editable: true 
+                    },
                     { label: 'Future Value', val: formatINR(reverseResult.futureValuation || 0), color: '#f59e0b' },
                     { label: 'Monthly SIP', val: formatINR(reverseResult.monthlySIP || 0), color: '#10b981' },
                     { label: 'Timeline', val: `${reverseResult.timeframeYears || '?'} Years`, color: '#6366f1' },
-                  ].map(({ label, val, color }) => (
-                    <div key={label} style={{
-                      background: 'rgba(0,0,0,0.25)', borderRadius: 14, padding: '14px 16px',
-                      border: '1px solid rgba(255,255,255,0.07)',
-                    }}>
+                  ].map(({ label, val, color, editable }) => (
+                    <div 
+                      key={label} 
+                      onClick={() => editable && !isEditingGoalPrice && (setIsEditingGoalPrice(true), setGoalPriceInput(reverseResult.currentValuation))}
+                      style={{
+                        background: 'rgba(0,0,0,0.25)', borderRadius: 14, padding: '14px 16px',
+                        border: '1px solid rgba(255,255,255,0.07)',
+                        cursor: editable ? 'pointer' : 'default',
+                        transition: 'all 0.2s',
+                        position: 'relative'
+                      }}
+                    >
                       <p style={{ fontSize: 11, color: '#cbd5e1', fontWeight: 600, textTransform: 'uppercase', marginBottom: 6 }}>{label}</p>
                       <p style={{ fontSize: 18, fontWeight: 800, color }}>{val}</p>
+                      {editable && !isEditingGoalPrice && (
+                        <Edit size={10} style={{ position: 'absolute', top: 12, right: 12, opacity: 0.5 }} />
+                      )}
                     </div>
                   ))}
                 </div>
@@ -915,6 +1074,21 @@ const Strategist = () => {
                 </div>
               )}
 
+              {/* Persistence Action */}
+              <button 
+                type="button"
+                onClick={(e) => handleSaveCurrent(e)}
+                style={{
+                  width: '100%', padding: '16px', borderRadius: 16, cursor: 'pointer',
+                  background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.3)',
+                  color: '#fbbf24', fontSize: 14, fontWeight: 700,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                  marginBottom: 24, transition: 'all 0.2s'
+                }}
+              >
+                <Bookmark size={18} /> Vault this Goal Blueprint
+              </button>
+
               {/* Disclaimer */}
               <p style={{ fontSize: 11, color: '#94a3b8', textAlign: 'center', lineHeight: 1.6 }}>
                 ⚠️ Projections use estimated inflation rates and assumed portfolio returns. Actual results will vary. This is not SEBI-registered advice. Consult a certified financial advisor before investing.
@@ -923,7 +1097,164 @@ const Strategist = () => {
           </motion.div>
         )}
 
+        {/* ── SAVED MODE: Vault ─────────────────────────────────────────── */}
+        {mode === 'saved' && (
+          <motion.div key="saved-vault"
+            initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }}
+            style={{ display: 'flex', flexDirection: 'column', gap: 20 }}
+          >
+            {loading && (
+              <div style={{ textAlign: 'center', padding: 40 }}>
+                <RefreshCw size={32} color="#6366f1" style={{ animation: 'spin 1s linear infinite' }} />
+                <p style={{ color: '#64748b', marginTop: 12 }}>Syncing your vault...</p>
+              </div>
+            )}
+
+            {!loading && savedPlans.length === 0 && (
+              <div style={{ ...card, textAlign: 'center', padding: '60px 40px' }}>
+                <Bookmark size={48} color="rgba(255,255,255,0.05)" style={{ marginBottom: 16 }} />
+                <h3 style={{ fontSize: 18, color: '#f1f5f9' }}>Your Vault is Empty</h3>
+                <p style={{ color: '#64748b', marginTop: 8 }}>Save your generated strategies to track and manage them here.</p>
+              </div>
+            )}
+
+            {!loading && savedPlans.map(plan => (
+              <div key={plan.id} style={card}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <div style={{ flex: 1 }}>
+                    <h3 style={{ fontSize: 18, fontWeight: 700, color: '#f1f5f9' }}>{plan.name}</h3>
+                    <p style={{ fontSize: 13, color: '#64748b', marginTop: 4 }}>{plan.description}</p>
+                    <div style={{ display: 'flex', gap: 12, marginTop: 12 }}>
+                       <span style={{ fontSize: 11, background: 'rgba(255,255,255,0.05)', padding: '4px 10px', borderRadius: 6, color: '#94a3b8' }}>
+                         {new Date(plan.createdAt).toLocaleDateString()}
+                       </span>
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <button 
+                      onClick={() => {
+                         const strategy = plan.data;
+                         const trades = strategy.suggestedTrades || strategy.trades || [];
+                         if (trades.length === 0) {
+                           alert("This strategy contains no executable trades.");
+                           return;
+                         }
+                         handleExecuteOrders(trades);
+                      }}
+                      style={{ padding: '8px 12px', borderRadius: 8, background: 'rgba(5,150,105,0.1)', border: 'none', color: '#10b981', cursor: 'pointer', fontSize: 12, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6 }}
+                    >
+                      <Activity size={14} /> Execute
+                    </button>
+                    <button 
+                      onClick={() => {
+                         const strategy = plan.data;
+                         if (strategy.goalTitle) {
+                           setReverseResult(strategy);
+                           setMode('reverse');
+                           setStep(4);
+                         } else {
+                           setStrategy(strategy);
+                           setMode('standard');
+                           setStep(4);
+                         }
+                      }}
+                      style={{ padding: '8px 12px', borderRadius: 8, background: 'rgba(99,102,241,0.1)', border: 'none', color: '#818cf8', cursor: 'pointer', fontSize: 12, fontWeight: 600 }}
+                    >View Plan</button>
+                    <button 
+                      onClick={() => {
+                        const text = `EquiSense AI Strategy: ${plan.name}\n${plan.description}\n\nGenerated by EquiSense Terminal.`;
+                        navigator.clipboard.writeText(text);
+                        alert("Strategy details copied to clipboard!");
+                      }}
+                      style={{ padding: '8px', borderRadius: 8, background: 'rgba(255,255,255,0.05)', border: 'none', color: '#94a3b8', cursor: 'pointer' }}
+                    ><Share2 size={16} /></button>
+                    <button 
+                      onClick={() => handleDelete(plan.id)}
+                      style={{ padding: '8px', borderRadius: 8, background: 'rgba(239,68,68,0.1)', border: 'none', color: '#ef4444', cursor: 'pointer' }}
+                    ><Trash2 size={16} /></button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </motion.div>
+        )}
+
       </AnimatePresence>
+
+      <AnimatePresence>
+        {saveSuccess && (
+          <motion.div 
+            initial={{ opacity: 0, y: 50 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 50 }}
+            style={{
+              position: 'fixed', bottom: 40, left: '50%', transform: 'translateX(-50%)',
+              background: 'linear-gradient(135deg, #10b981, #059669)',
+              padding: '12px 24px', borderRadius: 99, color: 'white', fontWeight: 700,
+              display: 'flex', alignItems: 'center', gap: 10, boxShadow: '0 10px 25px rgba(16,185,129,0.3)',
+              zIndex: 1000, fontSize: 14
+            }}
+          >
+            <CheckCircle2 size={18} /> Strategy Vaulted Successfully!
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Save Strategy Modal */}
+      {showSaveModal && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center',
+          background: 'rgba(3,6,11,0.85)', backdropFilter: 'blur(8px)'
+        }}>
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }}
+            style={{ ...card, width: '100%', maxWidth: 440, padding: 32 }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20 }}>
+              <div style={{ width: 44, height: 44, borderRadius: 12, background: 'rgba(99,102,241,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <Bookmark color="#6366f1" size={24} />
+              </div>
+              <div>
+                <h3 style={{ fontSize: 20, fontWeight: 800, color: '#f1f5f9' }}>Vault Strategy</h3>
+                <p style={{ fontSize: 13, color: '#64748b' }}>Give your investment plan a title</p>
+              </div>
+            </div>
+
+            <input 
+              autoFocus
+              value={tempStrategyName}
+              onChange={(e) => setTempStrategyName(e.target.value)}
+              placeholder="e.g. Retirement Growth 2030"
+              style={{
+                width: '100%', padding: '14px 18px', borderRadius: 14, background: 'rgba(255,255,255,0.04)',
+                border: '1px solid rgba(255,255,255,0.1)', color: 'white', fontSize: 16, marginBottom: 24,
+                outline: 'none', transition: 'border-color 0.2s'
+              }}
+              onFocus={(e) => e.target.style.borderColor = '#6366f1'}
+              onBlur={(e) => e.target.style.borderColor = 'rgba(255,255,255,0.1)'}
+            />
+
+            <div style={{ display: 'flex', gap: 12 }}>
+              <button 
+                onClick={() => setShowSaveModal(false)}
+                style={{ flex: 1, padding: '14px', borderRadius: 14, background: 'rgba(255,255,255,0.05)', border: 'none', color: '#94a3b8', fontSize: 14, fontWeight: 700, cursor: 'pointer' }}
+              >Cancel</button>
+              <button 
+                onClick={confirmSave}
+                disabled={isSaving || !tempStrategyName.trim()}
+                style={{
+                  flex: 1, padding: '14px', borderRadius: 14, 
+                  background: 'linear-gradient(135deg, #6366f1, #4f46e5)', border: 'none', 
+                  color: 'white', fontSize: 14, fontWeight: 700, cursor: isSaving ? 'wait' : 'pointer'
+                }}
+              >
+                {isSaving ? 'Vaulting...' : 'Save to Vault'}
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      )}
+
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>
   );

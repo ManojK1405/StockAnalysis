@@ -2,7 +2,10 @@ import YahooFinance from 'yahoo-finance2';
 import { analyzeStock } from '../utils/analysis.js';
 import { fetchStockNews } from '../utils/news.js';
 import { getNewsSentiment, getAIPredictionReasoning } from '../utils/gemini.js';
-const yahooFinance = new YahooFinance();
+const yahooFinance = new YahooFinance({ 
+    suppressNotices: ['yahooSurvey'],
+    validation: { logErrors: false } // Reduce noise from intermittent schema mismatches
+});
 
 export const getStockPrediction = async (req, res) => {
   let { symbol } = req.params;
