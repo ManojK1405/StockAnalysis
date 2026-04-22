@@ -4,7 +4,6 @@ import dotenv from 'dotenv';
 import cron from 'node-cron';
 import { PrismaClient } from '@prisma/client';
 import { createServer } from 'http';
-import { Server } from 'socket.io';
 import YahooFinance from 'yahoo-finance2';
 
 const yahooFinance = new YahooFinance({ 
@@ -20,14 +19,21 @@ import marketRoutes from './routes/market.routes.js';
 import backtestRoutes from './routes/backtest.routes.js';
 import alertRoutes from './routes/alert.routes.js';
 import strategyRoutes from './routes/strategy.routes.js';
+import zerodhaRoutes from './routes/zerodha.routes.js';
 
 // Load environment variables
 dotenv.config();
 
 const app = express();
 const httpServer = createServer(app);
-const io = new Server(httpServer, {
-  cors: { origin: "*", methods: ["GET", "POST"] }
+
+// Initialize Socket.io
+import { Server } from 'socket.io';
+export const io = new Server(httpServer, {
+  cors: {
+    origin: "*",
+    methods: ["GET", "POST"]
+  }
 });
 
 const prisma = new PrismaClient();
@@ -49,9 +55,13 @@ app.use('/api/market', marketRoutes);
 app.use('/api/backtest', backtestRoutes);
 app.use('/api/alerts', alertRoutes);
 app.use('/api/strategy', strategyRoutes);
+app.use('/api/zerodha', zerodhaRoutes);
 
 // --- Background Jobs ---
 import { processPendingQueue } from './controllers/portfolio.controller.js';
+import { setupSocketHandlers } from './utils/socket.js';
+
+setupSocketHandlers();
 
 // Market hours check every 5 minutes
 cron.schedule('*/5 * * * *', async () => {
@@ -72,44 +82,20 @@ cron.schedule('*/30 * * * *', async () => {
   }
 });
 
-// --- Real-time Price Ticker (WebSocket) ---
-io.on('connection', (socket) => {
-  console.log('Client connected to Live Ticker:', socket.id);
-  
-  socket.on('subscribe', async (symbols) => {
-    if (!Array.isArray(symbols)) return;
-    socket.join(symbols); // Join rooms for specific symbols
-    console.log(`Socket ${socket.id} subscribed to:`, symbols);
-  });
-
-  socket.on('disconnect', () => {
-    console.log('Client disconnected');
-  });
-});
-
-// Broadcast latest prices every 10 seconds
-cron.schedule('*/10 * * * * *', async () => {
-  const rooms = Array.from(io.sockets.adapter.rooms.keys());
-  const symbols = rooms.filter(r => r.includes('.NS') || r.includes('.BO'));
-  
-  if (symbols.length === 0) return;
-
-  try {
-     const quotes = await yahooFinance.quote(symbols);
-     const results = Array.isArray(quotes) ? quotes : [quotes];
-     
-     results.forEach(q => {
-        io.to(q.symbol).emit('price_update', {
-           symbol: q.symbol,
-           price: q.regularMarketPrice,
-           change: q.regularMarketChangePercent
-        });
-     });
-  } catch (err) {
-     // fail silently for backgrounds
-  }
-});
-
 httpServer.listen(PORT, () => {
   console.log(`Server is listening on port ${PORT} `);
 });
+
+// Aggressive unbind handling to ensure reliable Nodemon restarts
+process.once('SIGUSR2', () => {
+  httpServer.close(() => {
+    process.kill(process.pid, 'SIGUSR2');
+  });
+});
+
+process.on('SIGINT', () => {
+  httpServer.close(() => {
+    process.exit(0);
+  });
+});
+

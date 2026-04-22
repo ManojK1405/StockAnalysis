@@ -28,6 +28,11 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  brokerType      String?
+  brokerApiKey    String?
+  brokerApiSecret String?
+  brokerAccess    String?
+
   watchlist Watchlist[]
   portfolio PortfolioItem[]
   alerts    Alert[]

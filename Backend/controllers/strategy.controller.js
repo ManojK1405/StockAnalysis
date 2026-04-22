@@ -1,5 +1,5 @@
 import YahooFinance from 'yahoo-finance2';
-import { getAIStrategy, getNewsSentiment } from '../utils/gemini.js';
+import { getAIStrategy, getNewsSentiment, generateGeminiText } from '../utils/gemini.js';
 import { fetchStockNews } from '../utils/news.js';
 import * as TI from 'technicalindicators';
 import { PrismaClient } from '@prisma/client';
@@ -520,3 +520,31 @@ export const updateStrategy = async (req, res) => {
   }
 };
 
+export const chatStrategy = async (req, res) => {
+  const { messages } = req.body;
+  if (!messages || !messages.length) {
+    return res.status(400).json({ error: 'Messages are required.' });
+  }
+
+  try {
+    const userMessage = messages[messages.length - 1].content;
+    const prompt = `
+      Persona: Expert Quant Strategist & Investment Advisor.
+      Context: User is asking about market strategies, stock picks, or financial planning.
+      User Message: "${userMessage}"
+      
+      Requirements:
+      - Provide a professional, data-driven response.
+      - Use specific Indian market examples if applicable.
+      - If they ask for a strategy, explain the logic (e.g., "Golden Crossover", "Mean Reversion").
+      - Be concise but insightful.
+      - Keep a helpful, institutional tone.
+    `;
+
+    const response = await generateGeminiText(prompt);
+    res.json({ role: 'assistant', content: response });
+  } catch (error) {
+    console.error('[Chat Strategy] Error:', error.message);
+    res.status(500).json({ error: 'AI Strategist is temporarily unavailable.' });
+  }
+};

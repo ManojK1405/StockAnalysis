@@ -58,13 +58,75 @@ export const removeFromWatchlist = async (req, res) => {
 
 // Portfolio
 export const getPortfolio = async (req, res) => {
+  const { mode = 'mock' } = req.query; // Default to mock mode
   try {
+    const user = await prisma.user.findUnique({ where: { id: req.userId } });
+
+    if (mode === 'live' && user && user.brokerType === 'zerodha' && user.brokerAccess) {
+        try {
+            const [holdingsRaw, positionsRaw] = await Promise.all([
+               axios.get('https://api.kite.trade/portfolio/holdings', {
+                 headers: { 'X-Kite-Version': '3', 'Authorization': `token ${user.brokerAccess}` }
+               }),
+               axios.get('https://api.kite.trade/portfolio/positions', {
+                 headers: { 'X-Kite-Version': '3', 'Authorization': `token ${user.brokerAccess}` }
+               })
+            ]);
+
+            const mergedMap = {};
+            
+            // Map live holdings
+            if (holdingsRaw.data.data) {
+                holdingsRaw.data.data.forEach(h => {
+                   if (h.quantity === 0) return;
+                   const sym = h.tradingsymbol + (h.exchange === 'BSE' ? '.BO' : '.NS');
+                   if (!mergedMap[sym]) mergedMap[sym] = { quantity: 0, totalVal: 0, currentPrice: h.last_price };
+                   mergedMap[sym].quantity += h.quantity;
+                   mergedMap[sym].totalVal += (h.quantity * h.average_price);
+                });
+            }
+
+            // Map live net day positions
+            if (positionsRaw.data.data && positionsRaw.data.data.net) {
+                positionsRaw.data.data.net.forEach(p => {
+                   if (p.quantity === 0) return;
+                   const sym = p.tradingsymbol + (p.exchange === 'BSE' ? '.BO' : '.NS');
+                   if (!mergedMap[sym]) mergedMap[sym] = { quantity: 0, totalVal: 0, currentPrice: p.last_price };
+                   mergedMap[sym].quantity += p.quantity;
+                   mergedMap[sym].totalVal += (p.quantity * p.average_price);
+                });
+            }
+
+            const livePortfolio = Object.entries(mergedMap).map(([symbol, data]) => {
+                const totalCost = data.totalVal;
+                const currentTotalValue = data.quantity * data.currentPrice;
+                const pnl = currentTotalValue - totalCost;
+                return {
+                    id: `live-${symbol}`,
+                    stockId: symbol,
+                    stock: { symbol },
+                    quantity: data.quantity,
+                    avgPrice: totalCost / data.quantity,
+                    totalCost: totalCost,
+                    currentPrice: data.currentPrice,
+                    pnl: pnl,
+                    pnlPercent: (pnl / totalCost) * 100,
+                    type: 'live'
+                };
+            });
+            
+            return res.json(livePortfolio);
+        } catch (brokerErr) {
+            console.error('Live fetch failed, falling back to mock:', brokerErr.message);
+        }
+    }
+
+    // Mock Mode (default or fallback)
     const portfolio = await prisma.portfolioItem.findMany({
       where: { userId: req.userId },
       include: { stock: true }
     });
 
-    // Fetch real-time prices for each item
     const portfolioWithRealTime = await Promise.all(portfolio.map(async (item) => {
       try {
         const quote = await yahooFinance.quote(item.stock.symbol);
@@ -77,15 +139,17 @@ export const getPortfolio = async (req, res) => {
           ...item,
           currentPrice,
           pnl,
-          pnlPercent
+          pnlPercent,
+          type: 'mock'
         };
       } catch (e) {
-        return item;
+        return { ...item, type: 'mock' };
       }
     }));
 
     res.json(portfolioWithRealTime);
   } catch (error) {
+    console.error('Get Portfolio Error:', error);
     res.status(500).json({ error: 'Failed to fetch portfolio' });
   }
 };
@@ -134,28 +198,85 @@ export const addPortfolioItem = async (req, res) => {
 };
 
 export const syncBroker = async (req, res) => {
-  const { brokerType, apiKey, apiSecret } = req.body;
+  let { brokerType, apiKey, apiSecret, requestToken } = req.body;
   if (!apiKey) return res.status(401).json({ error: 'API Key is missing' });
 
   try {
+    if (apiKey === 'PERSISTED_IN_DB') {
+        const u = await prisma.user.findUnique({ where: { id: req.userId } });
+        if (!u || !u.brokerAccess) return res.status(401).json({ error: 'Stored session expired' });
+        apiKey = u.brokerAccess;
+    }
+
     let positions = [];
+    let authenticatedAccessToken = null;
 
     if (brokerType === 'zerodha') {
       try {
-        const response = await axios.get('https://api.kite.trade/portfolio/holdings', {
-          headers: {
-            'X-Kite-Version': '3',
-            'Authorization': `token ${apiKey}`
-          }
+        let accessToken = apiKey; // Default fallback to original "apiKey:accessToken" passed as apiKey
+        
+        // If a request token is provided, execute the OAuth handshake to get the real access token
+        if (requestToken && apiSecret) {
+            const crypto = (await import('crypto')).default;
+            const checksum = crypto.createHash('sha256').update(apiKey + requestToken + apiSecret).digest('hex');
+            
+            const params = new URLSearchParams();
+            params.append('api_key', apiKey);
+            params.append('request_token', requestToken);
+            params.append('checksum', checksum);
+
+            const sessionResp = await axios.post('https://api.kite.trade/session/token', params, {
+                headers: {
+                    'X-Kite-Version': '3',
+                    'Content-Type': 'application/x-www-form-urlencoded'
+                }
+            });
+            // Construct the canonical string Zerodha expects: "apiKey:accessToken"
+            accessToken = `${apiKey}:${sessionResp.data.data.access_token}`;
+        }
+
+        const [holdingsRaw, positionsRaw] = await Promise.all([
+           axios.get('https://api.kite.trade/portfolio/holdings', {
+             headers: { 'X-Kite-Version': '3', 'Authorization': `token ${accessToken}` }
+           }),
+           axios.get('https://api.kite.trade/portfolio/positions', {
+             headers: { 'X-Kite-Version': '3', 'Authorization': `token ${accessToken}` }
+           })
+        ]);
+
+        const holdings = holdingsRaw.data.data || [];
+        const netPositions = positionsRaw.data.data?.net || [];
+
+        const mergedMap = {};
+
+        // Process Long-Term Holdings
+        holdings.forEach(h => {
+           if (h.quantity === 0) return;
+           const sym = h.tradingsymbol + (h.exchange === 'BSE' ? '.BO' : '.NS');
+           if (!mergedMap[sym]) mergedMap[sym] = { quantity: 0, totalVal: 0 };
+           mergedMap[sym].quantity += h.quantity;
+           mergedMap[sym].totalVal += (h.quantity * h.average_price);
         });
-        const holdings = response.data.data || [];
-        positions = holdings.map(h => ({
-          symbol: h.tradingsymbol + (h.exchange === 'NSE' ? '.NS' : '.BO'),
-          quantity: h.quantity,
-          avgPrice: h.average_price
+
+        // Process Live Intraday/Derivative Positions
+        netPositions.forEach(p => {
+           if (p.quantity === 0) return;
+           const sym = p.tradingsymbol + (p.exchange === 'BSE' ? '.BO' : '.NS');
+           if (!mergedMap[sym]) mergedMap[sym] = { quantity: 0, totalVal: 0 };
+           mergedMap[sym].quantity += p.quantity;
+           mergedMap[sym].totalVal += (p.quantity * p.average_price);
+        });
+
+        // Calculate blended averages for final database payload
+        positions = Object.entries(mergedMap).map(([symbol, data]) => ({
+           symbol: symbol,
+           quantity: data.quantity,
+           avgPrice: data.totalVal / data.quantity
         }));
+        authenticatedAccessToken = accessToken; // Save token for client return
       } catch (err) {
-        throw new Error('Zerodha authentication failed. Invalid API credentials or expired token.');
+        console.error('Zerodha Sync Error:', err.response?.data || err.message);
+        throw new Error('Zerodha authentication failed. Check your API credentials and ensure the Request Token is fresh.');
       }
     } else if (brokerType === 'groww') {
       try {
@@ -183,39 +304,18 @@ export const syncBroker = async (req, res) => {
       return res.status(400).json({ error: 'Unsupported broker type.' });
     }
 
-    if (positions.length === 0) {
-       return res.status(400).json({ error: 'No active holdings found in your broker account.' });
-    }
-
-    // Inject positions array into the DB
-    const createdItems = [];
-    for (const pos of positions) {
-      if (pos.quantity <= 0) continue;
-      
-      let stock = await prisma.stock.findUnique({ where: { symbol: pos.symbol } });
-      if (!stock) {
-        stock = await prisma.stock.create({ data: { symbol: pos.symbol } });
+    // Write validated Session Keys directly into the relational Postgres DB for the user
+    await prisma.user.update({
+      where: { id: req.userId },
+      data: {
+         brokerType: brokerType,
+         brokerApiKey: apiKey,
+         brokerApiSecret: apiSecret || null,
+         brokerAccess: authenticatedAccessToken || apiKey
       }
+    });
 
-      const existingItem = await prisma.portfolioItem.findUnique({
-        where: { userId_stockId: { userId: req.userId, stockId: stock.id } }
-      });
-
-      if (!existingItem) {
-        const item = await prisma.portfolioItem.create({
-          data: {
-            userId: req.userId,
-            stockId: stock.id,
-            quantity: pos.quantity,
-            avgPrice: pos.avgPrice,
-            totalCost: pos.quantity * pos.avgPrice
-          }
-        });
-        createdItems.push(item);
-      }
-    }
-
-    res.json({ message: 'Live broker connected successfully', synced: createdItems.length });
+    res.json({ message: 'Live broker connected securely. Session preserved in DB.', synced: positions.length, accessToken: authenticatedAccessToken });
   } catch (error) {
     console.error('Broker Sync Error:', error);
     res.status(500).json({ error: error.message || 'Failed to sync broker' });

@@ -39,6 +39,25 @@ export const fetchStockNews = async (symbol, name, sector) => {
         } catch (e) {
             console.error("NewsAPI Error:", e.message);
         }
+
+        // 1b. Fetch General Market News from NewsAPI
+        try {
+            const marketQuery = `(Nifty 50 OR Sensex OR "Indian stock market" OR "RBI" OR "NSE India") AND (stock OR market OR economy)`;
+            const marketResp = await axios.get(`https://newsapi.org/v2/everything`, {
+                params: {
+                    q: marketQuery,
+                    searchIn: 'title,description',
+                    sortBy: 'publishedAt',
+                    language: 'en',
+                    pageSize: 8,
+                    apiKey: apiKey
+                }
+            });
+            const marketArticles = (marketResp.data.articles || []).map(a => ({ ...a, isMarketNews: true }));
+            newsApiArticles.push(...marketArticles);
+        } catch (e) {
+            console.error("Market NewsAPI Error:", e.message);
+        }
     }
 
     // 2. Fetch from Yahoo Finance (Search endpoint)
@@ -61,7 +80,8 @@ export const fetchStockNews = async (symbol, name, sector) => {
             description: a.description,
             url: a.url,
             source: a.source.name,
-            publishedAt: a.publishedAt
+            publishedAt: a.publishedAt,
+            isMarketNews: !!a.isMarketNews
         })),
         ...yahooArticles.map(a => ({
             title: a.title,
@@ -86,12 +106,14 @@ export const fetchStockNews = async (symbol, name, sector) => {
         // Noise gate for MRF/Recycling
         if ((cleanSymbol === 'MRF') && (lowTitle.includes('waste') || lowTitle.includes('recycl'))) return false;
 
-        // Ensure relevance: Must mention part of the name, ticker, or synonym
+        // Ensure relevance: Must mention part of the name, ticker, or synonym OR be general market news
         const n = name.toLowerCase();
         const s = cleanSymbol.toLowerCase();
         const e = extraTerm.toLowerCase();
         
-        return lowTitle.includes(n) || lowTitle.includes(s) || (e && lowTitle.includes(e)) || (sector && lowTitle.includes(sector.toLowerCase()));
+        const isStockRelevant = lowTitle.includes(n) || lowTitle.includes(s) || (e && lowTitle.includes(e)) || (sector && lowTitle.includes(sector.toLowerCase()));
+        
+        return art.isMarketNews || isStockRelevant;
     });
 
     return final.sort((a, b) => new Date(b.publishedAt) - new Date(a.publishedAt)).slice(0, 15);

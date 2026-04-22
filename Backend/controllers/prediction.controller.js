@@ -116,10 +116,14 @@ export const getStockPrediction = async (req, res) => {
         dividendYield: quote.dividendYield || 0,
         beta: quote.beta || 0,
         eps: quote.trailingEps || 0,
-        marketState: quote.marketState || 'N/A'
+        marketState: quote.marketState || 'N/A',
+        fiftyTwoWeekHigh: quote.fiftyTwoWeekHigh || 0,
+        fiftyTwoWeekLow: quote.fiftyTwoWeekLow || 0,
+        regularMarketVolume: quote.regularMarketVolume || 0,
+        regularMarketOpen: quote.regularMarketOpen || 0
       };
     } else {
-      analysis.fundamentals = { marketCap: 0, peRatio: 0, dividendYield: 0, beta: 0, eps: 0, marketState: 'N/A' };
+      analysis.fundamentals = { marketCap: 0, peRatio: 0, dividendYield: 0, beta: 0, eps: 0, marketState: 'N/A', fiftyTwoWeekHigh: 0, fiftyTwoWeekLow: 0, regularMarketVolume: 0, regularMarketOpen: 0 };
     }
 
     // Assemble final structured response
@@ -131,7 +135,11 @@ export const getStockPrediction = async (req, res) => {
         dividendYield: quote?.dividendYield || 0,
         beta: quote?.beta || 0,
         eps: quote?.trailingEps || 0,
-        marketState: quote?.marketState || 'N/A'
+        marketState: quote?.marketState || 'N/A',
+        fiftyTwoWeekHigh: quote?.fiftyTwoWeekHigh || 0,
+        fiftyTwoWeekLow: quote?.fiftyTwoWeekLow || 0,
+        regularMarketVolume: quote?.regularMarketVolume || 0,
+        regularMarketOpen: quote?.regularMarketOpen || 0
       }
     };
 

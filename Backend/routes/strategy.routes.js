@@ -1,5 +1,14 @@
 import express from 'express';
-import { generateStrategy, generateIntradayPulse, generateReverseStrategy, saveStrategy, getSavedStrategies, deleteStrategy, updateStrategy } from '../controllers/strategy.controller.js';
+import { 
+    generateStrategy, 
+    generateIntradayPulse, 
+    generateReverseStrategy, 
+    saveStrategy, 
+    getSavedStrategies, 
+    deleteStrategy, 
+    updateStrategy, 
+    chatStrategy 
+} from '../controllers/strategy.controller.js';
 
 import { auth } from '../middlewares/auth.middleware.js';
 
@@ -7,6 +16,9 @@ const router = express.Router();
 
 // POST /api/strategy/generate
 router.post('/generate', generateStrategy);
+
+// POST /api/strategy/chat
+router.post('/chat', chatStrategy);
 
 // POST /api/strategy/intraday
 router.post('/intraday', generateIntradayPulse);

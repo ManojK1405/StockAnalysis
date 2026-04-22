@@ -1,578 +1,215 @@
 import React, { useState, useEffect } from 'react';
-import axios from 'axios';
-import { motion, AnimatePresence } from 'framer-motion';
-import { TrendingUp, Newspaper, Search, ArrowUpRight, ArrowDownRight, Info, BookmarkPlus, PlayCircle, Activity, Globe, Database, Cpu, Zap, SearchCode } from 'lucide-react';
-import * as api from '../api';
-import StockChart from '../components/StockChart';
+import { Search, TrendingUp, BarChart3, PieChart, Newspaper, ArrowUpRight, ArrowDownRight, Globe, Layers } from 'lucide-react';
+import { motion } from 'framer-motion';
+import api from '../api';
 
 const Dashboard = () => {
-  const [data, setData] = useState(null);
-  const [backtestData, setBacktestData] = useState(null);
-  const [loadingBacktest, setLoadingBacktest] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [symbol, setSymbol] = useState('');
-  const [searchInput, setSearchInput] = useState('');
-  const [addingToWatchlist, setAddingToWatchlist] = useState(false);
-  const [isExtracting, setIsExtracting] = useState(false);
+    const [searchQuery, setSearchQuery] = useState('');
+    const [marketData, setMarketData] = useState(null);
+    const [loading, setLoading] = useState(true);
 
-  const [suggestions, setSuggestions] = useState([]);
-  const [showSuggestions, setShowSuggestions] = useState(false);
-  const [marketStatus, setMarketStatus] = useState('Checking...');
+    const [searchResults, setSearchResults] = useState([]);
+    const [showSuggestions, setShowSuggestions] = useState(false);
 
-  useEffect(() => {
-    const fetchMarketStatus = async () => {
-      try {
-        const resp = await axios.get('http://localhost:5001/api/predictions/market-status');
-        setMarketStatus(resp.data.state === 'REGULAR' ? 'Open' : 'Closed');
-      } catch (err) {
-        setMarketStatus('Unknown');
-      }
-    };
-    fetchMarketStatus();
-  }, []);
+    const [selectedStock, setSelectedStock] = useState(null);
 
-  const fetchSuggestions = async (query) => {
-    if (query.length < 2) {
-      setSuggestions([]);
-      return;
-    }
-    try {
-      const resp = await axios.get(`http://localhost:5001/api/predictions/search/${query}`);
-      setSuggestions(resp.data);
-    } catch (e) {
-      console.error("Suggestions error:", e);
-    }
-  };
-
-  const handleSearch = (e) => {
-    const val = e.target.value;
-    setSearchInput(val);
-    fetchSuggestions(val);
-    setShowSuggestions(true);
-  };
-
-  const handleKeyDown = async (e) => {
-    if (e.key === 'Enter' && searchInput.trim()) {
-      setShowSuggestions(false);
-      
-      setIsExtracting(true);
-      try {
-        const resp = await axios.post(`http://localhost:5001/api/predictions/extract-symbol`, { query: searchInput });
-        const extractedSymbol = resp.data.symbol;
-        
-        if (extractedSymbol) {
-          setSymbol(extractedSymbol);
-          setSearchInput(extractedSymbol);
-        } else {
-          // Fallback only if it looks like a ticker (one word, short)
-          const cleanInput = searchInput.trim();
-          if (!cleanInput.includes(' ') && cleanInput.length <= 12) {
-            const fallback = cleanInput.toUpperCase().includes('.') ? cleanInput.toUpperCase() : `${cleanInput.toUpperCase()}.NS`;
-            setSymbol(fallback);
-            setSearchInput(fallback);
-          } else {
-            alert('AI could not identify a specific stock ticker in your query. Please try searching for a company name or ticker symbol directly.');
-          }
+    const fetchMarket = async () => {
+        try {
+            setLoading(true);
+            const res = await api.get('/market/summary');
+            setMarketData(res.data);
+        } catch (e) {
+            console.error(e);
+        } finally {
+            setLoading(false);
         }
-      } catch (err) {
-        console.error("Extraction error:", err);
-        const fallback = searchInput.toUpperCase().includes('.') ? searchInput.toUpperCase() : `${searchInput.toUpperCase()}.NS`;
-        setSymbol(fallback);
-      } finally {
-        setIsExtracting(false);
-      }
-    }
-  };
+    };
 
-  useEffect(() => {
-    const handleClick = () => setShowSuggestions(false);
-    window.addEventListener('click', handleClick);
-    return () => window.removeEventListener('click', handleClick);
-  }, []);
+    useEffect(() => {
+        fetchMarket();
+    }, []);
 
-  const fetchBacktest = async (targetSymbol) => {
-    setLoadingBacktest(true);
-    try {
-      const resp = await axios.get(`http://localhost:5001/api/backtest/${targetSymbol}`);
-      setBacktestData(resp.data);
-    } catch (e) {
-      console.error('Backtest error:', e);
-    } finally {
-      setLoadingBacktest(false);
-    }
-  };
+    const handleSelection = (stock) => {
+        setSearchQuery('');
+        setShowSuggestions(false);
+        setSelectedStock(stock);
+    };
 
-  const fetchAnalysis = async (targetSymbol) => {
-    setLoading(true);
-    setBacktestData(null);
-    setData(null);
-    try {
-      const res = await api.getPrediction(targetSymbol);
-      setData(res.data);
-      fetchBacktest(targetSymbol);
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
-  };
+    useEffect(() => {
+        const fetchSuggestions = async () => {
+            if (searchQuery.length < 2) {
+                setSearchResults([]);
+                setShowSuggestions(false);
+                return;
+            }
+            try {
+                const res = await api.get(`/market/search?q=${searchQuery}`);
+                setSearchResults(res.data);
+                setShowSuggestions(true);
+            } catch (e) {
+                console.error(e);
+            }
+        };
 
-  useEffect(() => {
-    if (symbol) {
-      fetchAnalysis(symbol);
-    }
-  }, [symbol]);
+        const timer = setTimeout(fetchSuggestions, 300);
+        return () => clearTimeout(timer);
+    }, [searchQuery]);
 
-  const handleAddToWatchlist = async () => {
-    if (!data) return;
-    setAddingToWatchlist(true);
-    try {
-      await api.addToWatchlist(data.symbol);
-      alert('Added to watchlist!');
-    } catch (error) {
-      console.error('Error adding to watchlist:', error);
-    } finally {
-      setAddingToWatchlist(false);
-    }
-  };
-
-  const formatNumber = (num) => {
-    if (!num) return 'N/A';
-    if (num >= 1e7) return `₹${(num / 1e7).toFixed(1)} Cr`;
-    if (num >= 1e5) return `₹${(num / 1e5).toFixed(1)} L`;
-    return num.toLocaleString();
-  };
-
-  return (
-    <div className="relative min-h-[calc(100vh-2rem)] bg-[#03060b] text-slate-200 overflow-hidden m-4 rounded-[40px] shadow-2xl border border-white/5 font-outfit">
-      
-      {/* Background Ambience */}
-      <div className="absolute top-[-25%] left-[-15%] w-[70%] h-[70%] bg-blue-600/10 blur-[180px] rounded-full pointer-events-none mix-blend-screen" />
-      <div className="absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] bg-fuchsia-600/10 blur-[150px] rounded-full pointer-events-none mix-blend-screen" />
-      <div className="absolute top-8 right-12 z-20 hidden md:flex items-center gap-6">
-        <div className="flex flex-col items-end">
-          <p className="text-[10px] uppercase font-bold tracking-[0.2em] text-slate-500 mb-1">Indian Market</p>
-          <div className="flex items-center gap-2">
-            {(() => {
-              const isOpen = marketStatus === 'Open';
-              return (
-                <>
-                  <div className={`w-2 h-2 rounded-full ${isOpen ? 'bg-emerald-500' : 'bg-rose-500'}`} />
-                  <span className={`text-sm font-black uppercase tracking-widest ${isOpen ? 'text-emerald-400' : 'text-rose-400'}`}>
-                    {marketStatus}
-                  </span>
-                </>
-              );
-            })()}
-          </div>
-        </div>
-      </div>
-
-
-      <div className="relative z-10 p-8 md:p-12">
-        <header className="flex mb-12 flex-col md:flex-row items-start md:items-center justify-between gap-6">
-          <div>
-            <div className="flex items-center gap-4">
-              <h1 className="text-4xl font-extrabold tracking-tight text-white flex items-center gap-3">
-                <Database className="w-8 h-8 text-blue-400" />
-                Global Equity Desk
-              </h1>
-              {data && (
-                <div className={`flex items-center gap-2 px-3 py-1 rounded-full border ${data.fundamentals?.marketState === 'REGULAR' ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' : 'bg-rose-500/10 border-rose-500/30 text-rose-400'} animate-pulse`}>
-                  <div className={`w-2 h-2 rounded-full ${data.fundamentals?.marketState === 'REGULAR' ? 'bg-emerald-500' : 'bg-rose-500 shadow-[0_0_10px_rgba(244,63,94,0.5)]'}`} />
-                  <span className="text-[10px] font-black uppercase tracking-widest">
-                    Market {data.fundamentals?.marketState === 'REGULAR' ? 'Open' : 'Closed'}
-                  </span>
-                </div>
-              )}
-            </div>
-            <p className="mt-2 text-sm text-slate-400 font-medium uppercase tracking-[0.2em]">Institutional Engine & Predictive Modeling</p>
-          </div>
-          
-          <div className="relative flex-1 w-full max-w-md">
-            <div className="absolute inset-y-0 left-5 flex items-center pointer-events-none">
-              <SearchCode className="h-5 w-5 text-blue-400" />
-            </div>
-            <input
-              type="text"
-              placeholder="Search ticker (e.g. Reliance, SBI, AAPL)..."
-              value={searchInput}
-              onChange={handleSearch}
-              onKeyDown={handleKeyDown}
-              onFocus={() => setShowSuggestions(true)}
-              className={`w-full bg-[#0d1117]/80 backdrop-blur-xl border ${isExtracting ? 'border-blue-500/50 outline-none ring-4 ring-blue-500/10' : 'border-white/10'} rounded-full py-4 pl-14 pr-6 text-white focus:outline-none focus:border-blue-500/50 focus:ring-4 focus:ring-blue-500/10 transition-all font-medium placeholder:text-slate-500 shadow-[0_0_30px_rgba(0,0,0,0.5)]`}
-            />
-            
-            {isExtracting && (
-              <div className="absolute right-6 inset-y-0 flex items-center">
-                <div className="w-5 h-5 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
-              </div>
-            )}
-            
-            <AnimatePresence>
-              {showSuggestions && suggestions.length > 0 && (
-                <motion.div 
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -10 }}
-                  className="absolute top-[calc(100%+12px)] left-0 right-0 bg-[#0d1117]/95 backdrop-blur-2xl border border-white/10 rounded-3xl shadow-2xl overflow-hidden z-50"
-                >
-                  <div className="p-2 space-y-1">
-                    {suggestions.map((s) => (
-                      <button
-                        key={s.symbol}
-                        onClick={() => {
-                          setSymbol(s.symbol);
-                          setSearchInput(s.symbol);
-                          setShowSuggestions(false);
-                        }}
-                        className="w-full px-5 py-3 text-left hover:bg-white/5 rounded-2xl flex items-center justify-between group transition-all"
-                      >
-                        <div className="flex flex-col">
-                          <span className="font-bold text-white group-hover:text-blue-400 transition-colors uppercase tracking-wide">{s.symbol}</span>
-                          <span className="text-[10px] text-slate-500 font-medium tracking-wide truncate max-w-[200px] mt-0.5">{s.name}</span>
-                        </div>
-                        <ArrowUpRight className="w-4 h-4 text-slate-600 group-hover:text-blue-400 transition-all" />
-                      </button>
-                    ))}
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
-        </header>
-
-        <AnimatePresence mode="wait">
-          {!data && !loading ? (
-            <motion.div
-              key="empty"
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="flex flex-col items-center justify-center min-h-[50vh] rounded-[40px] bg-white/[0.02] border border-white/[0.05] border-dashed backdrop-blur-sm"
-            >
-              <div className="relative group">
-                 <div className="absolute inset-0 bg-blue-500/20 blur-[60px] group-hover:bg-blue-500/40 transition-all duration-700 rounded-full" />
-                 <Cpu className="w-24 h-24 text-[#0d1117] relative z-10 drop-shadow-[0_0_20px_rgba(96,165,250,0.5)] bg-slate-200 p-5 rounded-[2rem]" />
-              </div>
-              <p className="mt-8 text-xl font-bold text-slate-300">Awaiting Terminal Input</p>
-              <p className="mt-3 text-sm text-slate-500 font-medium max-w-md text-center leading-relaxed">
-                Enter an Indian equity symbol in the search bar above to generate a full fundamental, technical, and algorithmic profile.
-              </p>
-            </motion.div>
-          ) : loading ? (
-            <motion.div
-              key="loading"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="flex flex-col items-center justify-center min-h-[60vh] rounded-[40px] bg-white/[0.02] backdrop-blur-md border border-white/5"
-            >
-              <div className="relative w-32 h-32 mb-10">
-                <div className="absolute inset-0 border-t-2 border-blue-400 rounded-full animate-spin shadow-[0_0_30px_rgba(59,130,246,0.5)]" />
-                <div className="absolute inset-2 border-r-2 border-fuchsia-400 rounded-full animate-[spin_2s_linear_infinite_reverse]" />
-                <div className="absolute inset-4 border-b-2 border-cyan-400 rounded-full animate-[spin_3s_linear_infinite]" />
-                <Globe className="w-10 h-10 text-white absolute inset-0 m-auto" />
-              </div>
-              <h2 className="text-2xl font-black tracking-widest uppercase text-white animate-pulse">Aggregating Nodes</h2>
-              <p className="mt-3 text-[10px] uppercase tracking-[0.4em] text-blue-400/80 font-bold">Scanning Global Architectures</p>
-            </motion.div>
-          ) : data ? (
-            <motion.div
-              key="dashboard"
-              initial={{ opacity: 0, y: 30 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.6, staggerChildren: 0.1 }}
-              className="space-y-8"
-            >
-              {/* Header Profile Area */}
-              <div className="flex flex-col xl:flex-row gap-8">
-                {/* Main Graph Panel */}
-                <div className="flex-1 bg-[#090d14]/80 backdrop-blur-xl border border-white/10 rounded-[32px] p-8 overflow-hidden relative shadow-2xl">
-                  {/* Decorative corner curve */}
-                  <div className="absolute top-0 right-0 w-32 h-32 bg-blue-500/10 blur-[50px] pointer-events-none" />
-                  
-                  <div className="flex justify-between items-start mb-10">
-                    <div>
-                      <div className="flex items-center gap-3 mb-3">
-                        <span className="bg-blue-500/20 border border-blue-500/40 text-blue-400 px-3 py-1 text-[10px] uppercase tracking-widest font-bold rounded-lg backdrop-blur-md">
-                          Institutional View
-                        </span>
-                      </div>
-                      <h2 className="text-5xl font-black text-white tracking-tighter shadow-sm">{data.symbol}</h2>
-                      <p className="mt-2 text-slate-400 font-medium text-lg">{data.name}</p>
-                    </div>
-                    
-                    <div className="text-right">
-                      <p className="text-4xl font-extrabold text-white tracking-tight">₹{data.currentPrice?.toLocaleString()}</p>
-                      <button 
-                        onClick={handleAddToWatchlist}
-                        disabled={addingToWatchlist}
-                        className="mt-4 flex items-center gap-2 bg-white/5 hover:bg-blue-500/20 hover:text-blue-300 border border-white/10 px-5 py-2.5 rounded-xl text-sm font-bold text-slate-300 transition-all ml-auto"
-                      >
-                        <BookmarkPlus className="w-4 h-4" /> Watchlist
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="h-[400px] w-full mt-6 rounded-2xl overflow-hidden bg-black/40 border border-white/5 relative z-10 p-2">
-                     <StockChart data={data.chartData} />
-                  </div>
-                </div>
-
-                {/* Institutional Research Report Panel */}
-                <div className="w-full xl:w-[480px] flex flex-col gap-6">
-                  {/* Signal Summary Bar */}
-                  <div className="bg-gradient-to-br from-[#0e131f] to-[#0a0f18] border border-white/10 rounded-[32px] p-8 shadow-2xl relative overflow-hidden group">
-                    <div className="absolute -inset-1 bg-gradient-to-r from-blue-600/20 to-fuchsia-600/20 blur opacity-30 group-hover:opacity-100 transition duration-1000 group-hover:duration-200" />
-                    
-                    <div className="relative z-10">
-                      <div className="flex items-center justify-between mb-6">
-                        <div>
-                          <p className="text-[10px] uppercase font-black tracking-[0.3em] text-blue-400 mb-1">Algorithmic Signal</p>
-                          <div className="flex items-center gap-4">
-                            <span className={`text-3xl font-black tracking-tighter ${data.signal.toUpperCase().includes('BUY') ? 'text-emerald-400' : data.signal.toUpperCase().includes('SELL') ? 'text-rose-400' : 'text-slate-300'}`}>
-                              {data.signal}
-                            </span>
-                            <span className={`text-xs font-black px-3 py-1 rounded-full ${data.signal.toUpperCase().includes('BUY') ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30' : 'bg-rose-500/15 text-rose-400 border border-rose-500/30'}`}>
-                              {(Math.abs(data.score) / 60 * 100).toFixed(0)}% confidence
-                            </span>
-                          </div>
-                        </div>
-                        <div className="w-12 h-12 rounded-2xl bg-blue-600/10 border border-blue-500/30 flex items-center justify-center text-blue-400">
-                          <Zap className="w-6 h-6 fill-current" />
-                        </div>
-                      </div>
-
-                      {/* Signal Meter */}
-                      <div className="h-2 w-full bg-white/5 rounded-full overflow-hidden mb-6">
-                        <motion.div 
-                          initial={{ width: 0 }}
-                          animate={{ width: `${Math.min(Math.abs(data.score) / 60 * 100, 100)}%` }}
-                          transition={{ duration: 1.2, ease: 'easeOut' }}
-                          className={`h-full ${data.signal.toUpperCase().includes('BUY') ? 'bg-gradient-to-r from-emerald-600 to-emerald-400' : 'bg-gradient-to-r from-rose-600 to-rose-400'}`}
-                        />
-                      </div>
-
-                      {/* Trade Levels */}
-                      <div className="grid grid-cols-3 gap-3">
-                        <div className="bg-black/30 border border-emerald-500/15 p-4 rounded-2xl text-center">
-                          <p className="text-[9px] text-slate-500 uppercase tracking-widest font-black mb-2">Entry</p>
-                          <p className="text-lg font-black text-emerald-400">₹{data.buyLevel?.toLocaleString()}</p>
-                        </div>
-                        <div className="bg-black/30 border border-blue-500/15 p-4 rounded-2xl text-center">
-                          <p className="text-[9px] text-slate-500 uppercase tracking-widest font-black mb-2">Target</p>
-                          <p className="text-lg font-black text-blue-400">₹{data.sellLevel?.toLocaleString()}</p>
-                        </div>
-                        <div className="bg-black/30 border border-rose-500/15 p-4 rounded-2xl text-center">
-                          <p className="text-[9px] text-slate-500 uppercase tracking-widest font-black mb-2">Stop Loss</p>
-                          <p className="text-lg font-black text-rose-400">₹{data.stopLoss?.toLocaleString()}</p>
-                        </div>
-                      </div>
-                      <p className="text-[10px] text-slate-500 text-center mt-3 uppercase tracking-widest font-bold">{data.duration}</p>
-                    </div>
-                  </div>
-
-                  {/* Full AI Research Report */}
-                  <div className="bg-[#090d14]/80 backdrop-blur-xl border border-white/10 rounded-[32px] p-8 flex-1 shadow-2xl">
-                    <div className="flex items-center gap-3 mb-6">
-                      <Cpu className="w-5 h-5 text-blue-400" />
-                      <h3 className="text-lg font-black text-white tracking-tight">Institutional Research Note</h3>
-                    </div>
-                    <div className="space-y-4 max-h-[500px] overflow-y-auto pr-2 custom-scrollbar">
-                      {data.reasoning.map((reason, i) => {
-                        // Detect section headers (bold text like **Trend & Structure**)
-                        const headerMatch = reason.match(/^\*\*(.+?)\*\*/);
-                        const isHeader = headerMatch || reason.match(/^\d+\.\s*\*\*/);
-                        const cleanedReason = reason
-                          .replace(/^\d+\.\s*/, '')
-                          .replace(/\*\*/g, '')
-                          .replace(/^\*\s*/, '')
-                          .replace(/^-\s*/, '');
-
-                        if (isHeader) {
-                          const title = headerMatch ? headerMatch[1] : cleanedReason.split(':')[0];
-                          const body = cleanedReason.replace(title, '').replace(/^[:\s-]+/, '').trim();
-                          return (
-                            <div key={i} className="mt-2">
-                              <div className="flex items-center gap-2 mb-2">
-                                <div className="w-2 h-2 rounded-full bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.8)]" />
-                                <p className="text-sm font-black text-blue-400 uppercase tracking-wider">{title}</p>
-                              </div>
-                              {body && <p className="text-[13px] text-slate-300 leading-relaxed font-medium pl-4 border-l border-white/5">{body}</p>}
-                            </div>
-                          );
-                        }
-
-                        return (
-                          <div key={i} className="flex gap-3 items-start pl-4 border-l border-white/5">
-                            <p className="text-[13px] text-slate-300 leading-relaxed font-medium">{cleanedReason}</p>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Data Modulators */}
-              <div className="grid xl:grid-cols-[1fr_2fr] gap-8 mt-6">
+    return (
+        <div className="bg-[#fcfdfe] min-h-screen">
+            <div className="max-w-7xl mx-auto px-6 py-12 lg:py-16 text-center">
+                <h2 className="text-sm font-black text-blue-600 uppercase tracking-[0.3em] mb-4">Stock Analysis</h2>
+                <h1 className="text-5xl font-black text-slate-900 tracking-tight italic uppercase mb-16 underline decoration-blue-600 underline-offset-8">Research <span className="text-blue-600">Terminal</span></h1>
                 
-                {/* Key Metrics / Fundamentals View */}
-                <div className="bg-[#090d14]/80 backdrop-blur-xl border border-white/10 rounded-[32px] p-8 h-full shadow-2xl">
-                   <div className="flex items-center gap-3 mb-8">
-                      <Database className="w-5 h-5 text-slate-400" />
-                      <h3 className="text-lg font-black text-white tracking-tight">Market Core</h3>
-                   </div>
-                   
-                   <div className="grid grid-cols-2 gap-x-6 gap-y-8">
-                     <div className="border-l border-white/10 pl-4">
-                       <p className="text-[10px] uppercase font-black tracking-widest text-slate-500 mb-1">Cap Base</p>
-                       <p className="text-xl font-bold text-white">{formatNumber(data.fundamentals?.marketCap)}</p>
-                     </div>
-                     <div className="border-l border-white/10 pl-4">
-                       <p className="text-[10px] uppercase font-black tracking-widest text-slate-500 mb-1">P/E Modulus</p>
-                       <p className="text-xl font-bold text-white">{data.fundamentals?.peRatio?.toFixed(2) || 'N/A'}</p>
-                     </div>
-                     <div className="border-l border-white/10 pl-4">
-                       <p className="text-[10px] uppercase font-black tracking-widest text-slate-500 mb-1">Div Yield</p>
-                       <p className="text-xl font-bold text-white">{(data.fundamentals?.dividendYield * 100)?.toFixed(2) || '0.00'}%</p>
-                     </div>
-                     <div className="border-l border-white/10 pl-4">
-                       <p className="text-[10px] uppercase font-black tracking-widest text-slate-500 mb-1">Beta Risk</p>
-                       <p className="text-xl font-bold text-white">{data.fundamentals?.beta?.toFixed(2) || 'N/A'}</p>
-                     </div>
-                     <div className="border-l border-white/10 pl-4">
-                       <p className="text-[10px] uppercase font-black tracking-widest text-slate-500 mb-1">State</p>
-                       <p className={`text-xl font-bold ${data.fundamentals?.marketState === 'REGULAR' ? 'text-emerald-400' : 'text-slate-400'}`}>{data.fundamentals?.marketState || 'N/A'}</p>
-                     </div>
-                   </div>
-                </div>
-
-                {/* Telemetry / Backtest Engine */}
-                <div className="bg-[#090d14]/80 backdrop-blur-xl border border-fuchsia-500/20 bg-gradient-to-br from-fuchsia-500/[0.02] to-transparent rounded-[32px] p-8 shadow-2xl overflow-hidden relative">
-                   <div className="absolute right-0 bottom-0 opacity-10">
-                     <Activity className="w-48 h-48 text-fuchsia-500" />
-                   </div>
-                   <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between mb-8 pb-6 border-b border-white/5 gap-4">
-                      <div>
-                        <h3 className="text-lg font-black text-white tracking-tight flex items-center gap-3">
-                           <PlayCircle className="w-5 h-5 text-fuchsia-400" /> 12-Month Telemetry Backtest
-                        </h3>
-                        <p className="text-xs text-slate-400 mt-2 font-medium">Historical validation of algorithmic parameters directly against NIFTY benchmark.</p>
-                      </div>
-                   </div>
-
-                   {loadingBacktest ? (
-                     <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 h-24">
-                        {[1,2,3,4].map(idx => (
-                          <div key={idx} className="bg-white/5 rounded-2xl animate-pulse" />
-                        ))}
-                     </div>
-                   ) : backtestData ? (
-                     <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 relative z-10">
-                        <div className="bg-black/30 border border-white/5 p-5 rounded-2xl hover:border-white/10 transition-colors">
-                           <p className="text-[9px] uppercase font-bold tracking-widest text-slate-500 mb-2">Strategy APY</p>
-                           <p className="text-2xl font-black text-white">{backtestData.totalReturn}%</p>
-                        </div>
-                        <div className="bg-black/30 border border-white/5 p-5 rounded-2xl hover:border-white/10 transition-colors">
-                           <p className="text-[9px] uppercase font-bold tracking-widest text-slate-500 mb-2">Benchmark APY</p>
-                           <p className="text-2xl font-black text-slate-300">{backtestData.benchmarkReturn}%</p>
-                        </div>
-                        <div className="bg-black/30 border border-white/5 p-5 rounded-2xl hover:border-white/10 transition-colors">
-                           <p className="text-[9px] uppercase font-bold tracking-widest text-slate-500 mb-2">Executed Trades</p>
-                           <p className="text-2xl font-black text-white">{backtestData.tradeCount}</p>
-                        </div>
-                        <div className="bg-fuchsia-500/10 border border-fuchsia-500/20 p-5 rounded-2xl">
-                           <p className="text-[9px] uppercase font-bold tracking-widest text-fuchsia-400 mb-2">Net Status</p>
-                           <p className={`text-xl tracking-tight font-black ${parseFloat(backtestData.totalReturn) > parseFloat(backtestData.benchmarkReturn) ? 'text-emerald-400' : 'text-slate-400'}`}>
-                              {parseFloat(backtestData.totalReturn) > parseFloat(backtestData.benchmarkReturn) ? 'OUTPERFORM' : 'LAGGING'}
-                           </p>
-                        </div>
-                     </div>
-                   ) : (
-                     <div className="text-center py-6 text-sm text-slate-500 font-medium">Telemetry simulation bounds unavailable for this symbol sequence.</div>
-                   )}
-                </div>
-
-              </div>
-
-              {/* Bottom Section: Narrative and News */}
-              <div className="grid xl:grid-cols-[1fr_1.2fr] gap-8 mt-4">
-                
-                {/* AI Trend Narrative */}
-                <div className="bg-[#090d14]/80 backdrop-blur-xl border border-white/10 rounded-[32px] p-8 shadow-2xl flex flex-col">
-                  <div className="flex items-center gap-3 mb-6">
-                     <Activity className="w-5 h-5 text-blue-400" />
-                     <h3 className="text-lg font-black text-white tracking-tight">Trend Architecture</h3>
-                  </div>
-                  <div className="flex-1 space-y-6">
-                    <p className="text-sm font-medium text-slate-300 leading-relaxed border-l-2 border-blue-500/50 pl-4 py-1">
-                      {data.trendAnalysis?.overall?.description || "Market structure is currently undergoing testing and price discovery."}
-                    </p>
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="bg-black/30 border border-white/5 p-4 rounded-2xl">
-                         <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-2">Volume Profile</p>
-                         <p className="text-xs font-medium text-slate-300 leading-relaxed">{data.trendAnalysis?.volume?.description}</p>
-                      </div>
-                      <div className="bg-black/30 border border-white/5 p-4 rounded-2xl">
-                         <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-2">Oscillation Status</p>
-                         <p className="text-xs font-medium text-slate-300 leading-relaxed">{data.trendAnalysis?.indicators?.macd?.description}</p>
-                      </div>
+                {/* Search Bar */}
+                <div className="max-w-3xl mx-auto mb-16 relative">
+                    <div className="absolute left-6 top-1/2 -translate-y-1/2 text-slate-400">
+                        <Search className="w-6 h-6" />
                     </div>
-                    <div className="bg-blue-500/10 border border-blue-500/20 p-4 rounded-2xl">
-                       <p className="text-[10px] font-bold uppercase tracking-widest text-blue-400 mb-2">Actionable Zones</p>
-                       <p className="text-xs font-medium text-slate-300 leading-relaxed">{data.trendAnalysis?.supportResistance?.description}</p>
-                    </div>
-                  </div>
-                </div>
+                    <input 
+                        type="text" 
+                        placeholder="Search for stocks (e.g. RELIANCE, TCS, AAPL)..." 
+                        className="w-full pl-16 pr-8 py-6 bg-white border border-slate-200 rounded-[32px] shadow-2xl text-lg font-medium focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500/50 transition-all"
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
+                    />
 
-                {/* Live News Feed */}
-                <div className="bg-[#090d14]/80 backdrop-blur-xl border border-white/10 rounded-[32px] p-8 shadow-2xl flex flex-col h-full max-h-[500px]">
-                  <div className="flex items-center justify-between mb-6">
-                     <div className="flex items-center gap-3">
-                        <Newspaper className="w-5 h-5 text-fuchsia-400" />
-                        <h3 className="text-lg font-black text-white tracking-tight">Live Media & Sentiment Feed</h3>
-                     </div>
-                  </div>
-                  <div className="flex-1 overflow-y-auto pr-2 space-y-3 custom-scrollbar">
-                    {data.news && data.news.length > 0 ? (
-                      data.news.map((item, i) => (
-                        <a 
-                          key={i} 
-                          href={item.url} 
-                          target="_blank" 
-                          rel="noopener noreferrer" 
-                          className="block bg-black/30 border border-white/5 hover:border-fuchsia-500/30 p-4 rounded-2xl transition-all group"
-                        >
-                          <div className="flex justify-between items-start mb-2 gap-4">
-                            <h4 className="text-sm font-bold text-slate-200 group-hover:text-fuchsia-400 transition-colors line-clamp-2 leading-relaxed">{item.title}</h4>
-                            <ArrowUpRight className="w-4 h-4 text-slate-600 group-hover:text-fuchsia-400 shrink-0" />
-                          </div>
-                          <div className="flex items-center gap-3 mt-3">
-                             <span className="text-[10px] uppercase font-bold tracking-widest text-slate-500 bg-white/5 px-2 py-1 rounded-md">{item.source || 'Market Feed'}</span>
-                             <span className="text-[10px] font-bold text-slate-600">
-                               {item.publishedAt ? new Date(item.publishedAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : ''}
-                             </span>
-                          </div>
-                        </a>
-                      ))
-                    ) : (
-                      <div className="flex flex-col items-center justify-center h-full opacity-50 py-10">
-                         <Newspaper className="w-12 h-12 text-slate-600 mb-4" />
-                         <p className="text-sm font-medium text-slate-400">No recent mainstream media coverage found.</p>
-                      </div>
+                    {showSuggestions && searchResults.length > 0 && (
+                        <div className="absolute top-[calc(100%+10px)] left-0 w-full bg-white border border-slate-100 rounded-[32px] shadow-2xl z-50 overflow-hidden text-left py-4">
+                            {searchResults.map((res) => (
+                                <div 
+                                    key={res.symbol} 
+                                    className="px-8 py-4 hover:bg-blue-50 cursor-pointer flex justify-between items-center transition-colors border-b border-slate-50 last:border-0"
+                                    onClick={() => handleSelection(res)}
+                                >
+                                    <div>
+                                        <p className="font-black text-slate-900 tracking-tight">{res.symbol}</p>
+                                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{res.name}</p>
+                                    </div>
+                                    <div className="text-[10px] font-black bg-slate-100 px-3 py-1 rounded-full text-slate-500 uppercase tracking-widest leading-none">
+                                        {res.exch}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
                     )}
-                  </div>
                 </div>
 
-              </div>
-            </motion.div>
-          ) : null}
-        </AnimatePresence>
-      </div>
-    </div>
-  );
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+                    
+                    {/* Market Momentum */}
+                    <div className="lg:col-span-8 space-y-8">
+                        <div className="bg-white rounded-[40px] border border-slate-200 shadow-sm p-10 overflow-hidden relative">
+                             <div className="absolute top-0 right-0 w-64 h-64 bg-blue-500/5 blur-[80px] rounded-full" />
+                             <div className="flex justify-between items-center mb-10">
+                                <h3 className="text-2xl font-black text-slate-900 flex items-center gap-3 italic tracking-tight uppercase italic">
+                                    <TrendingUp className="w-6 h-6 text-blue-600" />
+                                    Market Analysis
+                                </h3>
+                             </div>
+                             
+                             <div className="aspect-[21/9] w-full bg-slate-50 rounded-[24px] border border-slate-100 flex items-center justify-center">
+                                <div className="text-center">
+                                    <BarChart3 className="w-16 h-16 text-slate-200 mb-4 mx-auto animate-pulse" />
+                                    <p className="text-slate-400 font-bold text-xs uppercase tracking-widest">Select an asset to load interactive chart</p>
+                                </div>
+                             </div>
+
+                             <div className="mt-8 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                                {marketData?.pulse?.map((idx) => (
+                                    <div key={idx.symbol} className={`p-6 rounded-3xl border ${idx.changePercent >= 0 ? 'bg-emerald-50 border-emerald-100' : 'bg-rose-50 border-rose-100'}`}>
+                                        <p className={`text-[10px] font-black uppercase tracking-widest mb-1 ${idx.changePercent >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{idx.name}</p>
+                                        <p className={`text-xl font-bold ${idx.changePercent >= 0 ? 'text-emerald-900' : 'text-rose-900'}`}>₹{idx.price.toLocaleString()}</p>
+                                        <p className={`text-xs font-bold mt-1 ${idx.changePercent >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>{idx.changePercent.toFixed(2)}%</p>
+                                    </div>
+                                ))}
+                             </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                            <div className="bg-white rounded-[40px] border border-slate-200 shadow-sm p-8">
+                                <h4 className="text-lg font-bold text-slate-900 mb-6 flex items-center gap-2 tracking-tight italic">
+                                    <Layers className="w-5 h-5 text-indigo-500" />
+                                    Top Sector Gainers
+                                </h4>
+                                <div className="space-y-4">
+                                    {['Metals', 'Auto', 'Energy'].map(s => (
+                                        <div key={s} className="flex justify-between items-center p-4 rounded-2xl bg-slate-50 border border-slate-100">
+                                            <span className="font-bold text-slate-700">{s}</span>
+                                            <span className="text-emerald-600 font-bold text-sm">+2.4%</span>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                            <div className="bg-white rounded-[40px] border border-slate-200 shadow-sm p-8">
+                                <h4 className="text-lg font-bold text-slate-900 mb-6 flex items-center gap-2 tracking-tight italic">
+                                    <Globe className="w-5 h-5 text-fuchsia-500" />
+                                    Global Indices
+                                </h4>
+                                <div className="space-y-4">
+                                    {['Nasdaq', 'DAX', 'Nikkei'].map(s => (
+                                        <div key={s} className="flex justify-between items-center p-4 rounded-2xl bg-slate-50 border border-slate-100">
+                                            <span className="font-bold text-slate-700">{s}</span>
+                                            <span className="text-rose-600 font-bold text-sm">-0.8%</span>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    {/* Side Feed */}
+                    <div className="lg:col-span-4 space-y-8">
+                        <div className="bg-indigo-600 rounded-[40px] p-8 text-white shadow-xl shadow-indigo-200">
+                            <h4 className="text-xl font-bold mb-6 flex items-center gap-2 italic">
+                                <Newspaper className="w-6 h-6 text-indigo-300" />
+                                Market News
+                            </h4>
+                            <div className="space-y-6">
+                                {marketData?.topNews?.map((news, i) => (
+                                    <div key={i} className="border-b border-indigo-500/50 pb-6">
+                                        <p className="text-[10px] font-bold text-indigo-300 uppercase tracking-widest mb-2">{news.publisher} • {news.content}</p>
+                                        <a href={news.link} target="_blank" rel="noreferrer" className="font-bold leading-tight hover:text-indigo-200 cursor-pointer block">
+                                            {news.title}
+                                        </a>
+                                    </div>
+                                ))}
+                                <button className="w-full py-4 rounded-2xl bg-indigo-500/50 hover:bg-indigo-500 transition-all font-bold text-sm">View All Research</button>
+                            </div>
+                        </div>
+
+                        <div className="bg-white rounded-[40px] border border-slate-200 shadow-sm p-8">
+                            <h4 className="text-lg font-bold text-slate-900 mb-6 tracking-tight italic flex items-center gap-2">
+                                <TrendingUp className="w-5 h-5 text-emerald-500" />
+                                Recent Analysis
+                            </h4>
+                            <div className="space-y-4">
+                                {marketData?.trending?.map((stock) => (
+                                    <div key={stock.symbol} className="flex justify-between items-center p-4 rounded-3xl hover:bg-slate-50 transition-colors border border-transparent hover:border-slate-100 group">
+                                        <div className="flex items-center gap-4">
+                                            <div className="w-12 h-12 rounded-2xl bg-slate-50 flex items-center justify-center font-bold text-slate-900 shadow-sm">
+                                                {stock.symbol[0]}
+                                            </div>
+                                            <div>
+                                                <p className="font-black text-slate-900 text-sm tracking-tight">{stock.symbol}</p>
+                                                <p className="text-[10px] text-slate-400 font-bold uppercase">₹{stock.price.toLocaleString()}</p>
+                                            </div>
+                                        </div>
+                                        <div className={`flex items-center font-bold text-xs ${stock.change >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
+                                            {stock.changePercent.toFixed(2)}%
+                                            {stock.change >= 0 ? <ArrowUpRight className="w-3 h-3 ml-1" /> : <ArrowDownRight className="w-3 h-3 ml-1" />}
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+        </div>
+    );
 };
 
 export default Dashboard;

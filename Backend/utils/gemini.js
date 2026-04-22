@@ -51,7 +51,7 @@ const tryGemini = async (executor) => {
     throw lastError;
 };
 
-const generateGeminiText = async (prompt) => {
+export const generateGeminiText = async (prompt) => {
     if (!geminiApiKey || FALLBACK_GEMINI_MODELS.length === 0) {
         throw new Error('Gemini configuration unavailable');
     }
