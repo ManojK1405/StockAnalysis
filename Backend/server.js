@@ -20,6 +20,7 @@ import backtestRoutes from './routes/backtest.routes.js';
 import alertRoutes from './routes/alert.routes.js';
 import strategyRoutes from './routes/strategy.routes.js';
 import zerodhaRoutes from './routes/zerodha.routes.js';
+import newsletterRoutes from './routes/newsletter.routes.js';
 
 // Load environment variables
 dotenv.config();
@@ -56,6 +57,7 @@ app.use('/api/backtest', backtestRoutes);
 app.use('/api/alerts', alertRoutes);
 app.use('/api/strategy', strategyRoutes);
 app.use('/api/zerodha', zerodhaRoutes);
+app.use('/api/newsletter', newsletterRoutes);
 
 // --- Background Jobs ---
 import { processPendingQueue } from './controllers/portfolio.controller.js';

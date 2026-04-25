@@ -1,6 +1,9 @@
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { PrismaClient } from '@prisma/client';
+import { OAuth2Client } from 'google-auth-library';
+
+const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 const prisma = new PrismaClient();
 
@@ -54,11 +57,50 @@ export const login = async (req, res) => {
   }
 };
 
+export const googleLogin = async (req, res) => {
+  const { tokenId } = req.body;
+
+  try {
+    const ticket = await client.verifyIdToken({
+      idToken: tokenId,
+      audience: process.env.GOOGLE_CLIENT_ID,
+    });
+
+    const { email, name, picture, sub } = ticket.getPayload();
+
+    let user = await prisma.user.findUnique({ where: { email } });
+
+    if (!user) {
+      user = await prisma.user.create({
+        data: {
+          email,
+          name,
+          avatar: picture,
+          googleId: sub,
+        },
+      });
+    } else if (!user.googleId) {
+      // Link google account if email matches but googleId is missing
+      user = await prisma.user.update({
+        where: { email },
+        data: { googleId: sub, avatar: picture },
+      });
+    }
+
+    const token = jwt.sign({ userId: user.id }, process.env.JWT_SECRET || 'secret', { expiresIn: '7d' });
+
+    res.status(200).json({ user: { id: user.id, email: user.email, name: user.name, avatar: user.avatar }, token });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Google authentication failed' });
+  }
+};
+
 export const getMe = async (req, res) => {
   try {
     const user = await prisma.user.findUnique({
       where: { id: req.userId },
-      select: { id: true, email: true, name: true }
+      select: { id: true, email: true, name: true, avatar: true }
     });
     res.status(200).json(user);
   } catch (error) {

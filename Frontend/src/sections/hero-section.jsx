@@ -63,14 +63,14 @@ export default function HeroSection() {
                     </linearGradient>
                 </defs>
             </svg>
-            <div className="flex flex-wrap items-center justify-center p-1.5 rounded-full border border-indigo-100 italic">
+            <div className="flex flex-wrap items-center justify-center p-1.5 rounded-full border border-orange-100 italic">
                 <p className="pl-2 pr-3 text-gray-400 font-bold text-[10px] uppercase tracking-widest leading-none">A Smarter Way to Invest</p>
             </div>
 
             <h1
                 className="text-4xl md:text-6xl/18 text-center font-bold max-w-4xl mt-5 bg-gradient-to-r from-black to-[#748298] text-transparent bg-clip-text tracking-tighter">
                 Systematic Wealth Engine for{" "}
-                <span className="bg-gradient-to-b from-blue-500 to-blue-800 bg-clip-text text-transparent">Intelligent Investors</span>.
+                <span className="text-premium">Intelligent Investors</span>.
             </h1>
             <p className="text-slate-500 md:text-lg max-md:px-4 text-center max-w-2xl mt-6 leading-relaxed">
                 Cut through the market noise. EquiSense brings together real-time data, AI sentiment, and technical clarity into one actionable view.
@@ -78,7 +78,7 @@ export default function HeroSection() {
 
             <div className="flex flex-wrap items-center justify-center gap-4 mt-10">
                 <button
-                    className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-10 py-4 rounded-full transition shadow-xl shadow-blue-200 font-bold uppercase text-xs tracking-widest">
+                    className="flex items-center gap-2 bg-orange-600 hover:bg-orange-700 text-white px-10 py-4 rounded-full transition shadow-xl shadow-orange-200 font-bold uppercase text-xs tracking-widest">
                     <span>Analyze the Market</span>
                     <ArrowRightIcon className='size-4' />
                 </button>

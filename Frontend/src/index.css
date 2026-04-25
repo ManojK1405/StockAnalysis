@@ -10,7 +10,11 @@ body {
 }
 
 .btn {
-    @apply cursor-pointer bg-gradient-to-r from-indigo-600 to-[#8A7DFF];
+    @apply cursor-pointer bg-gradient-to-r from-rose-500 to-orange-500;
+}
+
+.text-premium {
+    @apply bg-clip-text text-transparent bg-gradient-to-r from-rose-500 to-orange-500 py-1 leading-[1.2];
 }
 
 /* Custom Research Scrollbar - Hidden for premium look */

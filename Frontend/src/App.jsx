@@ -1,4 +1,5 @@
 import { Routes, Route } from "react-router-dom";
+import ScrollToTop from "./components/scroll-to-top";
 import Banner from "./components/banner";
 import LenisScroll from "./components/lenis-scroll";
 import Navbar from "./components/navbar";
@@ -9,24 +10,45 @@ import Portfolio from "./pages/Portfolio";
 import IntradayPulse from "./pages/IntradayPulse";
 import AIStrategist from "./pages/AIStrategist";
 import ReverseStrategist from "./pages/ReverseStrategist";
+import Backtester from "./pages/Backtester";
+import AboutUs from "./pages/AboutUs";
+import OurVision from "./pages/OurVision";
+import Terms from "./pages/Terms";
+import Privacy from "./pages/Privacy";
+import ContactUs from "./pages/ContactUs";
+import AuthModal from "./components/auth-modal";
+import { AuthProvider } from "./context/AuthContext";
+import { GoogleOAuthProvider } from "@react-oauth/google";
 
 export default function App() {
+    const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || "YOUR_GOOGLE_CLIENT_ID";
+
     return (
-        <>
-            <LenisScroll />
-            <Banner />
-            <Navbar />
-            <main className='min-h-screen bg-white'>
-                <Routes>
-                    <Route path="/" element={<Home />} />
-                    <Route path="/dashboard" element={<Dashboard />} />
-                    <Route path="/portfolio" element={<Portfolio />} />
-                    <Route path="/products/intraday-pulse" element={<IntradayPulse />} />
-                    <Route path="/products/ai-strategist" element={<AIStrategist />} />
-                    <Route path="/products/reverse-strategist" element={<ReverseStrategist />} />
-                </Routes>
-            </main>
-            <Footer />
-        </>
+        <GoogleOAuthProvider clientId={GOOGLE_CLIENT_ID}>
+            <AuthProvider>
+                <ScrollToTop />
+                <LenisScroll />
+                <Banner />
+                <Navbar />
+                <AuthModal />
+                <main className='min-h-screen bg-white'>
+                    <Routes>
+                        <Route path="/" element={<Home />} />
+                        <Route path="/dashboard" element={<Dashboard />} />
+                        <Route path="/portfolio" element={<Portfolio />} />
+                        <Route path="/products/intraday-pulse" element={<IntradayPulse />} />
+                        <Route path="/products/ai-strategist" element={<AIStrategist />} />
+                        <Route path="/products/reverse-strategist" element={<ReverseStrategist />} />
+                        <Route path="/products/backtester" element={<Backtester />} />
+                        <Route path="/about-us" element={<AboutUs />} />
+                        <Route path="/our-vision" element={<OurVision />} />
+                        <Route path="/terms" element={<Terms />} />
+                        <Route path="/privacy" element={<Privacy />} />
+                        <Route path="/contact-us" element={<ContactUs />} />
+                    </Routes>
+                </main>
+                <Footer />
+            </AuthProvider>
+        </GoogleOAuthProvider>
     );
 }

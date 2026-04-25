@@ -3,6 +3,7 @@ import { LayoutDashboard, Plus, Trash2, ArrowUpRight, ArrowDownRight, Briefcase,
 import api from '../api';
 import { motion, AnimatePresence } from 'framer-motion';
 import { io } from 'socket.io-client';
+import FeatureLock from '../components/feature-lock';
 
 const Portfolio = () => {
   const [watchlist, setWatchlist] = useState([]);
@@ -114,7 +115,7 @@ const Portfolio = () => {
         <header className="flex flex-col md:flex-row justify-between items-start md:items-center mb-12 gap-6">
           <div>
             <h1 className="text-4xl font-bold text-slate-900 flex items-center gap-3 tracking-tight">
-              <Briefcase className="w-10 h-10 text-blue-600" />
+              <Briefcase className="w-10 h-10 text-orange-600" />
               Portfolio Hub
             </h1>
             <p className="mt-2 text-slate-500 font-medium">Manage your equity vault and live positions</p>
@@ -124,7 +125,7 @@ const Portfolio = () => {
              <div className="flex bg-white p-1 rounded-2xl border border-slate-200 shadow-sm">
                <button 
                  onClick={() => setMode('mock')}
-                 className={`px-6 py-2.5 rounded-xl font-bold text-xs transition-all ${mode === 'mock' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-500 hover:bg-slate-50'}`}
+                 className={`px-6 py-2.5 rounded-xl font-bold text-xs transition-all ${mode === 'mock' ? 'bg-orange-600 text-white shadow-md' : 'text-slate-500 hover:bg-slate-50'}`}
                >
                  Mock Deck
                </button>
@@ -144,7 +145,7 @@ const Portfolio = () => {
              {mode === 'mock' && (
                <button 
                  onClick={() => setShowAddModal(true)}
-                 className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3.5 rounded-2xl font-bold transition-all shadow-lg flex items-center gap-2"
+                 className="bg-orange-600 hover:bg-orange-700 text-white px-6 py-3.5 rounded-2xl font-bold transition-all shadow-lg flex items-center gap-2"
                >
                  <Plus className="w-5 h-5" />
                  Log Trade
@@ -153,83 +154,85 @@ const Portfolio = () => {
           </div>
         </header>
 
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-            <div className="lg:col-span-8">
-                <div className="bg-white rounded-[32px] border border-slate-200 shadow-sm overflow-hidden">
-                    <div className="p-8 border-b border-slate-100 flex justify-between items-center">
-                        <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
-                           <LayoutDashboard className="w-5 h-5 text-blue-600" />
-                           Holdings
-                        </h2>
-                        <div className={`px-4 py-1.5 rounded-full text-xs font-bold ${totalPnL >= 0 ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'}`}>
-                            {totalPnLPercent.toFixed(2)}%
+        <FeatureLock featureName="Portfolio Hub" description="Unlock real-time portfolio tracking, live broker connectivity, and multi-asset management.">
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+                <div className="lg:col-span-8">
+                    <div className="bg-white rounded-[32px] border border-slate-200 shadow-sm overflow-hidden">
+                        <div className="p-8 border-b border-slate-100 flex justify-between items-center">
+                            <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+                               <LayoutDashboard className="w-5 h-5 text-orange-600" />
+                               Holdings
+                            </h2>
+                            <div className={`px-4 py-1.5 rounded-full text-xs font-bold ${totalPnL >= 0 ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'}`}>
+                                {totalPnLPercent.toFixed(2)}%
+                            </div>
+                        </div>
+                        <div className="overflow-x-auto">
+                            <table className="w-full text-left">
+                                <thead>
+                                    <tr className="bg-slate-50">
+                                        <th className="p-6 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Asset</th>
+                                        <th className="p-6 text-[10px] font-bold text-slate-400 uppercase tracking-widest text-right">Qty</th>
+                                        <th className="p-6 text-[10px] font-bold text-slate-400 uppercase tracking-widest text-right">Avg Entry</th>
+                                        <th className="p-6 text-[10px] font-bold text-slate-400 uppercase tracking-widest text-right">Live P&L</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-100">
+                                    {portfolio.map((item) => (
+                                        <tr key={item.id} className="hover:bg-slate-50/50 transition-colors">
+                                            <td className="p-6 flex items-center gap-4">
+                                                <div className="w-10 h-10 rounded-xl bg-orange-50 flex items-center justify-center font-bold text-orange-600">
+                                                    {item.stock.symbol[0]}
+                                                </div>
+                                                <div>
+                                                    <p className="font-bold text-slate-900">{item.stock.symbol}</p>
+                                                    <p className="text-[10px] text-slate-400 font-bold uppercase mt-1">Equity</p>
+                                                </div>
+                                            </td>
+                                            <td className="p-6 text-right font-bold text-slate-700">{item.quantity}</td>
+                                            <td className="p-6 text-right">
+                                                <p className="font-bold text-slate-900">₹{item.avgPrice.toFixed(2)}</p>
+                                                <p className="text-[10px] text-slate-400 font-bold mt-1">Live: ₹{item.currentPrice?.toFixed(2) || '--'}</p>
+                                            </td>
+                                            <td className="p-6 text-right">
+                                                <div className={`inline-flex items-center gap-1 font-bold ${item.pnl >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+                                                    {item.pnl >= 0 ? <ArrowUpRight className="w-4 h-4" /> : <ArrowDownRight className="w-4 h-4" />}
+                                                    ₹{Math.abs(item.pnl || 0).toFixed(0)}
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
                         </div>
                     </div>
-                    <div className="overflow-x-auto">
-                        <table className="w-full text-left">
-                            <thead>
-                                <tr className="bg-slate-50">
-                                    <th className="p-6 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Asset</th>
-                                    <th className="p-6 text-[10px] font-bold text-slate-400 uppercase tracking-widest text-right">Qty</th>
-                                    <th className="p-6 text-[10px] font-bold text-slate-400 uppercase tracking-widest text-right">Avg Entry</th>
-                                    <th className="p-6 text-[10px] font-bold text-slate-400 uppercase tracking-widest text-right">Live P&L</th>
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-slate-100">
-                                {portfolio.map((item) => (
-                                    <tr key={item.id} className="hover:bg-slate-50/50 transition-colors">
-                                        <td className="p-6 flex items-center gap-4">
-                                            <div className="w-10 h-10 rounded-xl bg-blue-50 flex items-center justify-center font-bold text-blue-600">
-                                                {item.stock.symbol[0]}
-                                            </div>
-                                            <div>
-                                                <p className="font-bold text-slate-900">{item.stock.symbol}</p>
-                                                <p className="text-[10px] text-slate-400 font-bold uppercase mt-1">Equity</p>
-                                            </div>
-                                        </td>
-                                        <td className="p-6 text-right font-bold text-slate-700">{item.quantity}</td>
-                                        <td className="p-6 text-right">
-                                            <p className="font-bold text-slate-900">₹{item.avgPrice.toFixed(2)}</p>
-                                            <p className="text-[10px] text-slate-400 font-bold mt-1">Live: ₹{item.currentPrice?.toFixed(2) || '--'}</p>
-                                        </td>
-                                        <td className="p-6 text-right">
-                                            <div className={`inline-flex items-center gap-1 font-bold ${item.pnl >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
-                                                {item.pnl >= 0 ? <ArrowUpRight className="w-4 h-4" /> : <ArrowDownRight className="w-4 h-4" />}
-                                                ₹{Math.abs(item.pnl || 0).toFixed(0)}
-                                            </div>
-                                        </td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                    </div>
                 </div>
-            </div>
 
-            <div className="lg:col-span-4">
-                <div className="bg-white rounded-[32px] border border-slate-200 shadow-sm p-8">
-                    <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2 mb-6">
-                        <Target className="w-5 h-5 text-blue-600" />
-                        Watchlist
-                    </h2>
-                    <div className="space-y-4">
-                        {watchlist.map((item) => (
-                            <div key={item.id} className="flex justify-between items-center p-4 rounded-2xl bg-slate-50 border border-slate-100">
-                                <div className="flex items-center gap-3">
-                                    <div className="w-8 h-8 rounded-lg bg-white flex items-center justify-center font-bold text-slate-400 text-xs shadow-sm">
-                                        {item.stock.symbol[0]}
+                <div className="lg:col-span-4">
+                    <div className="bg-white rounded-[32px] border border-slate-200 shadow-sm p-8">
+                        <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2 mb-6">
+                            <Target className="w-5 h-5 text-orange-600" />
+                            Watchlist
+                        </h2>
+                        <div className="space-y-4">
+                            {watchlist.map((item) => (
+                                <div key={item.id} className="flex justify-between items-center p-4 rounded-2xl bg-slate-50 border border-slate-100">
+                                    <div className="flex items-center gap-3">
+                                        <div className="w-8 h-8 rounded-lg bg-white flex items-center justify-center font-bold text-slate-400 text-xs shadow-sm">
+                                            {item.stock.symbol[0]}
+                                        </div>
+                                        <span className="font-bold text-slate-900 text-sm">{item.stock.symbol}</span>
                                     </div>
-                                    <span className="font-bold text-slate-900 text-sm">{item.stock.symbol}</span>
+                                    <button className="text-slate-300 hover:text-rose-500 transition-colors">
+                                        <Trash2 className="w-4 h-4" />
+                                    </button>
                                 </div>
-                                <button className="text-slate-300 hover:text-rose-500 transition-colors">
-                                    <Trash2 className="w-4 h-4" />
-                                </button>
-                            </div>
-                        ))}
+                            ))}
+                        </div>
                     </div>
                 </div>
             </div>
-        </div>
+        </FeatureLock>
       </div>
 
       <AnimatePresence>
@@ -241,7 +244,7 @@ const Portfolio = () => {
                 <input 
                     type="text" 
                     placeholder="Symbol (e.g. RELIANCE)" 
-                    className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:outline-none focus:border-blue-500" 
+                    className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:outline-none focus:border-orange-500" 
                     value={newItem.symbol}
                     onChange={(e) => setNewItem({...newItem, symbol: e.target.value})}
                 />
@@ -251,7 +254,7 @@ const Portfolio = () => {
                 </div>
                 <div className="flex gap-4 pt-4">
                     <button type="button" onClick={() => setShowAddModal(false)} className="flex-1 p-4 rounded-2xl border border-slate-200 font-bold text-slate-500 hover:bg-slate-50 transition-colors">Cancel</button>
-                    <button type="submit" className="flex-1 p-4 rounded-2xl bg-blue-600 text-white font-bold hover:bg-blue-700 transition-colors shadow-lg">Confirm</button>
+                    <button type="submit" className="flex-1 p-4 rounded-2xl bg-orange-600 text-white font-bold hover:bg-orange-700 transition-colors shadow-lg">Confirm</button>
                 </div>
               </form>
             </motion.div>

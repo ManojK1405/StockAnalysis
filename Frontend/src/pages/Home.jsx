@@ -12,8 +12,8 @@ export default function Home() {
             <WhatWeDoSection />
             <OurLatestCreations />
             <OurTestimonialSection />
-            <FaqSection />
             <Newsletter />
+            <FaqSection />
         </div>
     );
 }
