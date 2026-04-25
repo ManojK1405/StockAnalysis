@@ -27,6 +27,30 @@ export const connectZerodha = async (req, res) => {
         });
 
         const accessToken = response.data.data.access_token;
+        const fullToken = `${apiKey}:${accessToken}`;
+
+        // Calculate Expiry: Zerodha sessions expire at 06:00 AM IST (00:30 UTC)
+        const now = new Date();
+        const expiryDate = new Date();
+        expiryDate.setUTCHours(0, 30, 0, 0);
+        if (now.getUTCHours() > 0 || (now.getUTCHours() === 0 && now.getUTCMinutes() >= 30)) {
+            expiryDate.setUTCDate(expiryDate.getUTCDate() + 1);
+        }
+
+        // Persist Access Token for reuse throughout the day
+        if (req.userId) {
+            await prisma.user.update({
+                where: { id: req.userId },
+                data: {
+                    brokerType: 'zerodha',
+                    brokerApiKey: apiKey,
+                    brokerApiSecret: apiSecret,
+                    brokerAccess: fullToken,
+                    brokerAccessExpiry: expiryDate
+                }
+            });
+        }
+
         res.json({ success: true, accessToken, userDetails: response.data.data });
     } catch (error) {
         console.error("[Zerodha] Session generation failed:", error.response?.data || error.message);

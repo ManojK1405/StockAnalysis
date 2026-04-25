@@ -15,9 +15,11 @@ import OurVision from "./pages/OurVision";
 import Terms from "./pages/Terms";
 import Privacy from "./pages/Privacy";
 import ContactUs from "./pages/ContactUs";
+import Settings from "./pages/Settings";
 import AuthModal from "./components/auth-modal";
 import { AuthProvider } from "./context/AuthContext";
 import { GoogleOAuthProvider } from "@react-oauth/google";
+import { Toaster } from "react-hot-toast";
 
 export default function App() {
     const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || "YOUR_GOOGLE_CLIENT_ID";
@@ -27,6 +29,7 @@ export default function App() {
             <AuthProvider>
                 <ScrollToTop />
                 <LenisScroll />
+                <Toaster position="top-right" reverseOrder={false} />
                 <Navbar />
                 <AuthModal />
                 <main className='min-h-screen bg-white'>
@@ -43,6 +46,7 @@ export default function App() {
                         <Route path="/terms" element={<Terms />} />
                         <Route path="/privacy" element={<Privacy />} />
                         <Route path="/contact-us" element={<ContactUs />} />
+                        <Route path="/settings" element={<Settings />} />
                     </Routes>
                 </main>
                 <Footer />

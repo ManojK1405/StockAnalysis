@@ -4,7 +4,15 @@ import { Lock, Sparkles, ArrowRight } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
 const FeatureLock = ({ children, featureName = 'this feature', description = 'Access institutional-grade tools and AI-driven insights.' }) => {
-  const { user, setShowAuthModal } = useAuth();
+  const { user, loading, setShowAuthModal } = useAuth();
+  
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-[400px]">
+        <div className="w-12 h-12 border-4 border-slate-200 border-t-orange-600 rounded-full animate-spin"></div>
+      </div>
+    );
+  }
 
   if (user) {
     return <>{children}</>;

@@ -27,7 +27,7 @@ export const signup = async (req, res) => {
 
     const token = jwt.sign({ userId: user.id }, process.env.JWT_SECRET || 'secret', { expiresIn: '7d' });
 
-    res.status(201).json({ user: { id: user.id, email: user.email, name: user.name }, token });
+    res.status(201).json({ user: { id: user.id, email: user.email, name: user.name, brokerType: user.brokerType, brokerAccessExpiry: user.brokerAccessExpiry }, token });
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: 'Something went wrong' });
@@ -50,7 +50,7 @@ export const login = async (req, res) => {
 
     const token = jwt.sign({ userId: user.id }, process.env.JWT_SECRET || 'secret', { expiresIn: '7d' });
 
-    res.status(200).json({ user: { id: user.id, email: user.email, name: user.name }, token });
+    res.status(200).json({ user: { id: user.id, email: user.email, name: user.name, brokerType: user.brokerType, brokerAccessExpiry: user.brokerAccessExpiry }, token });
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: 'Something went wrong' });
@@ -89,7 +89,7 @@ export const googleLogin = async (req, res) => {
 
     const token = jwt.sign({ userId: user.id }, process.env.JWT_SECRET || 'secret', { expiresIn: '7d' });
 
-    res.status(200).json({ user: { id: user.id, email: user.email, name: user.name, avatar: user.avatar }, token });
+    res.status(200).json({ user: { id: user.id, email: user.email, name: user.name, avatar: user.avatar, brokerType: user.brokerType, brokerAccessExpiry: user.brokerAccessExpiry }, token });
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: 'Google authentication failed' });
@@ -100,7 +100,7 @@ export const getMe = async (req, res) => {
   try {
     const user = await prisma.user.findUnique({
       where: { id: req.userId },
-      select: { id: true, email: true, name: true, avatar: true }
+      select: { id: true, email: true, name: true, avatar: true, brokerType: true, brokerApiKey: true, brokerAccessExpiry: true }
     });
     res.status(200).json(user);
   } catch (error) {

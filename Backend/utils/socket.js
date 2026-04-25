@@ -1,11 +1,28 @@
 import { io } from '../server.js';
 import { KiteTicker } from 'kiteconnect';
 import { PrismaClient } from '@prisma/client';
+import cron from 'node-cron';
 
 const prisma = new PrismaClient();
 
 // Keep track of active tickers to avoid duplicate connections
 const activeTickers = new Map();
+
+// Schedule cleanup at 5:55 AM IST daily (00:25 UTC)
+cron.schedule('25 0 * * *', () => {
+  console.log('[Ticker Cleanup] 5:55 AM IST reached. Terminating all active tickers.');
+  activeTickers.forEach((ticker, userId) => {
+      try {
+        ticker.disconnect();
+        console.log(`Disconnected ticker for user ${userId}`);
+      } catch (e) {
+        console.error(`Error disconnecting ticker for user ${userId}:`, e.message);
+      }
+  });
+  activeTickers.clear();
+}, {
+  timezone: "UTC"
+});
 
 export const setupSocketHandlers = () => {
   io.on('connection', (socket) => {
@@ -57,6 +74,15 @@ const startZerodhaTicker = (userId, apiKey, accessToken, symbols) => {
         ticker.subscribe(symbols);
         ticker.setMode(ticker.modeFull, symbols);
     }
+  });
+
+  ticker.on('error', (err) => {
+    console.error(`Kite Ticker Error for user ${userId}:`, err);
+  });
+
+  ticker.on('noreconnect', () => {
+    console.error(`Kite Ticker failed to reconnect for user ${userId}`);
+    activeTickers.delete(userId);
   });
 
   activeTickers.set(userId, ticker);

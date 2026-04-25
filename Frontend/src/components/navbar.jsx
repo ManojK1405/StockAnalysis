@@ -119,9 +119,13 @@ export default function Navbar() {
                                             <p className='text-xs text-gray-400'>Logged in as</p>
                                             <p className='text-sm font-semibold text-slate-800 truncate'>{user.email}</p>
                                         </div>
-                                        <button className='flex w-full items-center gap-2 px-3 py-2 text-sm text-slate-600 hover:bg-slate-50 rounded-lg transition-colors'>
+                                        <Link 
+                                            to="/settings" 
+                                            onClick={() => setShowProfileMenu(false)}
+                                            className='flex w-full items-center gap-2 px-3 py-2 text-sm text-slate-600 hover:bg-slate-50 rounded-lg transition-colors'
+                                        >
                                             <UserIcon className='w-4 h-4' /> Profile Settings
-                                        </button>
+                                        </Link>
                                         <button 
                                             onClick={handleLogout}
                                             className='flex w-full items-center gap-2 px-3 py-2 text-sm text-red-500 hover:bg-red-50 rounded-lg transition-colors mt-1'

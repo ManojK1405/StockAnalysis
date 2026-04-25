@@ -1,0 +1,357 @@
+import React, { useState } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { 
+    User, Shield, Briefcase, Zap, AlertCircle, 
+    CheckCircle2, X, ChevronRight, ArrowRight,
+    ShieldAlert
+} from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
+import { toast } from 'react-hot-toast';
+import api from '../api';
+
+const Settings = () => {
+    const { user } = useAuth();
+    const [activeTab, setActiveTab] = useState('brokers'); // profile | security | brokers
+    const [showBrokerModal, setShowBrokerModal] = useState(false);
+    const [selectedBroker, setSelectedBroker] = useState(null);
+    const [credentials, setCredentials] = useState({ apiKey: '', apiSecret: '', requestToken: '' });
+
+    // Auto-capture request_token from URL after Zerodha redirect
+    React.useEffect(() => {
+        const urlParams = new URLSearchParams(window.location.search);
+        const token = urlParams.get('request_token');
+        if (token) {
+            setCredentials(prev => ({ 
+                ...prev, 
+                requestToken: token,
+                apiKey: user?.brokerApiKey || '' 
+            }));
+            setSelectedBroker({ id: 'zerodha', name: 'Zerodha Kite' });
+            setShowBrokerModal(true);
+            
+            // Auto-trigger handshake if we have the token and the broker is Zerodha
+            // This is the "get the token yourself" part
+            const triggerHandshake = async () => {
+                try {
+                    const res = await api.post('/portfolio/sync-broker', {
+                        brokerType: 'zerodha',
+                        apiKey: user?.brokerApiKey,
+                        requestToken: token
+                    });
+                    if (res.data.synced >= 0) {
+                        toast.success('Handshake Completed Successfully');
+                        window.location.href = '/settings'; // Clean URL
+                    }
+                } catch (e) {
+                    console.error('Auto-handshake failed', e);
+                }
+            };
+
+            if (user?.brokerApiKey) {
+                triggerHandshake();
+            }
+
+            // Clear URL params without refresh
+            window.history.replaceState({}, document.title, window.location.pathname);
+        }
+    }, [user]);
+
+    const isSessionValid = (brokerId) => {
+        if (user?.brokerType !== brokerId) return false;
+        if (!user?.brokerAccessExpiry) return false;
+        return new Date(user.brokerAccessExpiry) > new Date();
+    };
+
+    const brokers = [
+        { 
+            id: 'zerodha', 
+            name: 'Zerodha Kite', 
+            icon: 'https://kite.zerodha.com/static/images/kite-logo.svg',
+            status: isSessionValid('zerodha') ? 'Connected' : (user?.brokerType === 'zerodha' ? 'Expired' : 'Not Connected'),
+            enabled: true,
+            description: 'Indias leading discount broker with powerful API access.'
+        },
+        { 
+            id: 'groww', 
+            name: 'Groww', 
+            icon: 'https://groww.in/logo-groww.png',
+            status: 'Coming Soon',
+            enabled: false,
+            description: 'Simplified investing for the modern generation.'
+        },
+        { 
+            id: 'dhan', 
+            name: 'Dhan', 
+            icon: 'https://dhan.co/static/images/dhan-logo.svg',
+            status: 'Coming Soon',
+            enabled: false,
+            description: 'Built for super traders and long-term investors.'
+        }
+    ];
+
+    const handleConnect = async (e) => {
+        if (e) e.preventDefault();
+        try {
+            const res = await api.post('/portfolio/sync-broker', {
+                brokerType: selectedBroker.id,
+                ...credentials
+            });
+
+            if (res.data.loginUrl) {
+                toast.success('Redirecting to Broker...');
+                window.location.href = res.data.loginUrl;
+                return;
+            }
+
+            if (res.data.synced >= 0) {
+                toast.success(`${selectedBroker.name} connected successfully`);
+                setCredentials(prev => ({ ...prev, requestToken: '' })); // Clear temporary token
+                setShowBrokerModal(false);
+                window.location.reload(); 
+            }
+        } catch (error) {
+            toast.error(error.response?.data?.error || 'Connection failed');
+        }
+    };
+
+    return (
+        <div className="min-h-screen bg-[#fcfdfe] pt-32 pb-20 px-6 md:px-16 lg:px-24">
+            <div className="max-w-6xl mx-auto">
+                <header className="mb-12">
+                    <h1 className="text-4xl font-black text-slate-900 tracking-tighter italic uppercase mb-2">Account Settings</h1>
+                    <p className="text-slate-400 font-bold uppercase tracking-widest text-[10px]">Manage your profile and institutional connections</p>
+                </header>
+
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-12">
+                    {/* Navigation Sidebar */}
+                    <div className="lg:col-span-3 space-y-2">
+                        <button 
+                            onClick={() => setActiveTab('profile')}
+                            className={`w-full flex items-center gap-4 px-6 py-4 rounded-2xl transition-all font-black text-[10px] uppercase tracking-widest ${activeTab === 'profile' ? 'bg-slate-900 text-white shadow-xl shadow-slate-900/10' : 'text-slate-400 hover:bg-slate-50 hover:text-slate-900'}`}
+                        >
+                            <User className="w-4 h-4" />
+                            Identity
+                        </button>
+                        <button 
+                            onClick={() => setActiveTab('security')}
+                            className={`w-full flex items-center gap-4 px-6 py-4 rounded-2xl transition-all font-black text-[10px] uppercase tracking-widest ${activeTab === 'security' ? 'bg-slate-900 text-white shadow-xl shadow-slate-900/10' : 'text-slate-400 hover:bg-slate-50 hover:text-slate-900'}`}
+                        >
+                            <Shield className="w-4 h-4" />
+                            Security
+                        </button>
+                        <button 
+                            onClick={() => setActiveTab('brokers')}
+                            className={`w-full flex items-center gap-4 px-6 py-4 rounded-2xl transition-all font-black text-[10px] uppercase tracking-widest ${activeTab === 'brokers' ? 'bg-slate-900 text-white shadow-xl shadow-slate-900/10' : 'text-slate-400 hover:bg-slate-50 hover:text-slate-900'}`}
+                        >
+                            <Briefcase className="w-4 h-4" />
+                            Brokerage Hub
+                        </button>
+                    </div>
+
+                    {/* Content Area */}
+                    <div className="lg:col-span-9">
+                        <AnimatePresence mode="wait">
+                            {activeTab === 'brokers' && (
+                                <motion.div 
+                                    initial={{ opacity: 0, x: 20 }}
+                                    animate={{ opacity: 1, x: 0 }}
+                                    exit={{ opacity: 0, x: -20 }}
+                                    className="space-y-8"
+                                >
+                                    <div className="bg-white p-10 rounded-[48px] border border-slate-100 shadow-sm relative overflow-hidden">
+                                        <div className="absolute top-0 right-0 p-8">
+                                            <Zap className="w-12 h-12 text-orange-500 opacity-10" />
+                                        </div>
+                                        <h2 className="text-2xl font-black text-slate-900 tracking-tighter italic uppercase mb-2">Live Execution Bridge</h2>
+                                        <p className="text-slate-400 font-bold uppercase tracking-widest text-[10px] mb-10">Connect your demat account to enable autonomous AI trading</p>
+
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                            {brokers.map((broker) => (
+                                                <div 
+                                                    key={broker.id}
+                                                    className={`p-8 rounded-[32px] border transition-all ${broker.enabled ? 'bg-slate-50 border-slate-100 hover:border-orange-200 group' : 'bg-slate-50/50 border-slate-50 opacity-60'}`}
+                                                >
+                                                    <div className="flex justify-between items-start mb-6">
+                                                        <div className="w-12 h-12 bg-white rounded-2xl p-2 shadow-sm flex items-center justify-center">
+                                                            {broker.id === 'zerodha' ? (
+                                                                <span className="font-black text-xs text-orange-600">KITE</span>
+                                                            ) : (
+                                                                <span className="font-black text-xs text-slate-300">{broker.name[0]}</span>
+                                                            )}
+                                                        </div>
+                                                        <span className={`px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest ${broker.status === 'Connected' ? 'bg-emerald-100 text-emerald-600' : (broker.status === 'Expired' ? 'bg-amber-100 text-amber-600' : 'bg-slate-200 text-slate-500')}`}>
+                                                            {broker.status === 'Expired' ? 'Session Expired' : broker.status}
+                                                        </span>
+                                                    </div>
+                                                    <h3 className="text-lg font-black text-slate-900 tracking-tight mb-2 uppercase">{broker.name}</h3>
+                                                    <p className="text-xs text-slate-400 font-medium leading-relaxed mb-8">{broker.description}</p>
+                                                    
+                                                    {broker.enabled ? (
+                                                        <button 
+                                                            onClick={() => {
+                                                                setSelectedBroker(broker);
+                                                                setCredentials(prev => ({ 
+                                                                    ...prev, 
+                                                                    apiKey: user?.brokerApiKey || '',
+                                                                    apiSecret: '' 
+                                                                }));
+                                                                setShowBrokerModal(true);
+                                                            }}
+                                                            className="w-full py-4 bg-slate-900 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-orange-600 transition-all flex items-center justify-center gap-2 group-hover:shadow-lg group-hover:shadow-orange-600/20"
+                                                        >
+                                                            {broker.status === 'Connected' ? 'Session Active' : (broker.status === 'Expired' ? 'Re-establish Handshake' : 'Establish Link')}
+                                                            <ArrowRight className="w-3.5 h-3.5" />
+                                                        </button>
+                                                    ) : (
+                                                        <div className="w-full py-4 bg-slate-100 text-slate-400 rounded-2xl font-black text-[10px] uppercase tracking-widest text-center italic">
+                                                            Coming Soon
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+
+                                    <div className="bg-orange-50/50 border border-orange-100 p-8 rounded-[32px] flex items-start gap-5">
+                                        <div className="p-3 bg-white rounded-2xl text-orange-600 shadow-sm">
+                                            <AlertCircle className="w-6 h-6" />
+                                        </div>
+                                        <div>
+                                            <h4 className="font-black text-slate-900 uppercase tracking-widest text-xs mb-1 italic">Institutional Security Protocol</h4>
+                                            <p className="text-xs text-slate-500 leading-relaxed font-medium">EquiSense utilizes AES-256 bank-grade encryption to secure your API tokens. We never store your password or secondary authentication factors. All trade transmissions are routed through official broker-vetted SDKs.</p>
+                                        </div>
+                                    </div>
+                                </motion.div>
+                            )}
+
+                            {activeTab !== 'brokers' && (
+                                <motion.div 
+                                    initial={{ opacity: 0 }}
+                                    animate={{ opacity: 1 }}
+                                    className="h-64 flex flex-col items-center justify-center text-center space-y-4 bg-white rounded-[48px] border border-slate-50"
+                                >
+                                    <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center text-slate-200">
+                                        <User className="w-8 h-8" />
+                                    </div>
+                                    <p className="text-slate-400 font-bold uppercase tracking-widest text-[10px] italic">Profile & Security controls are coming in the next release.</p>
+                                </motion.div>
+                            )}
+                        </AnimatePresence>
+                    </div>
+                </div>
+            </div>
+
+            {/* Broker Connection Modal */}
+            <AnimatePresence>
+                {showBrokerModal && (
+                    <div className="fixed inset-0 z-[100] flex items-center justify-center p-6">
+                        <motion.div 
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            exit={{ opacity: 0 }}
+                            onClick={() => setShowBrokerModal(false)}
+                            className="absolute inset-0 bg-slate-900/60 backdrop-blur-md"
+                        />
+                        <motion.div 
+                            initial={{ scale: 0.9, opacity: 0, y: 20 }}
+                            animate={{ scale: 1, opacity: 1, y: 0 }}
+                            exit={{ scale: 0.9, opacity: 0, y: 20 }}
+                            className="relative bg-white w-full max-w-xl rounded-[48px] shadow-2xl overflow-hidden"
+                        >
+                            <div className="p-12">
+                                <div className="flex justify-between items-center mb-10">
+                                    <div className="flex items-center gap-4">
+                                        <div className="w-16 h-16 bg-slate-900 rounded-[24px] flex items-center justify-center text-white">
+                                            <ShieldAlert className="w-8 h-8" />
+                                        </div>
+                                        <div>
+                                            <h3 className="text-2xl font-black text-slate-900 italic tracking-tight uppercase">Connect {selectedBroker.name}</h3>
+                                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Handshake Initialization</p>
+                                        </div>
+                                    </div>
+                                    <button onClick={() => setShowBrokerModal(false)} className="p-4 bg-slate-50 rounded-2xl hover:bg-rose-50 hover:text-rose-600 transition-colors">
+                                        <X className="w-6 h-6" />
+                                    </button>
+                                </div>
+
+                                <form onSubmit={handleConnect} className="space-y-6">
+                                    <div className="space-y-2">
+                                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Broker API Key</label>
+                                        <input 
+                                            type="text" 
+                                            name="broker_api_key_field"
+                                            autoComplete="off"
+                                            className="w-full p-6 bg-slate-50 border border-slate-100 rounded-3xl text-sm font-black focus:outline-none focus:border-orange-600/30 transition-all" 
+                                            value={credentials.apiKey}
+                                            onChange={(e) => setCredentials({...credentials, apiKey: e.target.value})}
+                                            placeholder="Enter your broker API key"
+                                            required
+                                        />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Broker API Secret</label>
+                                        <input 
+                                            type="password" 
+                                            name="broker_api_secret_field"
+                                            autoComplete="new-password"
+                                            className="w-full p-6 bg-slate-50 border border-slate-100 rounded-3xl text-sm font-black focus:outline-none focus:border-orange-600/30 transition-all" 
+                                            value={credentials.apiSecret}
+                                            onChange={(e) => setCredentials({...credentials, apiSecret: e.target.value})}
+                                            placeholder="••••••••••••"
+                                            required
+                                        />
+                                    </div>
+                                    {selectedBroker.id === 'zerodha' && (
+                                        <div className="space-y-6">
+                                            <div className="p-6 bg-orange-50 border border-orange-100 rounded-3xl">
+                                                <h4 className="text-[10px] font-black text-orange-600 uppercase tracking-widest mb-2">Automated Handshake</h4>
+                                                <p className="text-[10px] text-slate-500 font-bold leading-relaxed mb-4 uppercase">
+                                                    After entering your keys, click below to authorize on Zerodha. We will capture the token automatically.
+                                                </p>
+                                                <button 
+                                                    type="button"
+                                                    onClick={() => {
+                                                        if (!credentials.apiKey) return toast.error('Enter API Key first');
+                                                        const loginUrl = `https://kite.zerodha.com/connect/login?v=3&api_key=${credentials.apiKey}`;
+                                                        window.location.href = loginUrl;
+                                                    }}
+                                                    className="w-full py-4 bg-white border-2 border-orange-200 text-orange-600 rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-orange-600 hover:text-white hover:border-orange-600 transition-all shadow-sm"
+                                                >
+                                                    Launch Kite Authorization
+                                                </button>
+                                            </div>
+
+                                            <div className="space-y-2">
+                                                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Manual Request Token (Optional)</label>
+                                                <input 
+                                                    type="text" 
+                                                    className="w-full p-6 bg-slate-50 border border-slate-100 rounded-3xl text-sm font-black focus:outline-none focus:border-orange-600/30 transition-all" 
+                                                    value={credentials.requestToken}
+                                                    onChange={(e) => setCredentials({...credentials, requestToken: e.target.value})}
+                                                    placeholder="Captured automatically after login"
+                                                />
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    <button 
+                                        type="submit"
+                                        className="w-full py-6 bg-slate-900 text-white rounded-[24px] font-black text-xs uppercase tracking-[0.2em] shadow-xl hover:bg-orange-600 transition-all active:scale-95 mt-4"
+                                    >
+                                        Establish Live Link
+                                    </button>
+                                    
+                                    <p className="text-[9px] text-center text-slate-400 font-bold uppercase tracking-widest leading-relaxed">
+                                        By connecting, you authorize EquiSense to execute trades on your behalf. <br/> This can be revoked at any time from your broker terminal.
+                                    </p>
+                                </form>
+                            </div>
+                        </motion.div>
+                    </div>
+                )}
+            </AnimatePresence>
+        </div>
+    );
+};
+
+export default Settings;

@@ -87,10 +87,24 @@ export default function HeroSection() {
                     Explore Strategy
                 </button>
             </div>
-            <p className="py-6 text-slate-600 mt-14">Trusting by leading brands, including —</p>
-
-            <div className="flex flex-wrap justify-between max-sm:justify-center gap-10 max-w-4xl w-full mx-auto py-4" id="logo-container">
-                {logos.map((logo, index) => <img key={index} src={logo} alt="logo" className="h-7 w-auto max-w-xs" />)}
+            {/* Market Alpha Metrics Bar */}
+            <div className="mt-20 w-full max-w-5xl px-6">
+                <div className="flex flex-wrap items-center justify-center gap-12 md:gap-24 py-10 border-y border-slate-100 bg-white/30 backdrop-blur-sm rounded-[40px]">
+                    <div className="text-center group">
+                        <p className="text-3xl font-black text-slate-900 tracking-tighter group-hover:text-orange-600 transition-colors">15% - 22%</p>
+                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">Avg. Strategy CAGR</p>
+                    </div>
+                    <div className="hidden md:block w-px h-10 bg-slate-100" />
+                    <div className="text-center group">
+                        <p className="text-3xl font-black text-slate-900 tracking-tighter group-hover:text-orange-600 transition-colors">50+</p>
+                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">Institutional Indicators</p>
+                    </div>
+                    <div className="hidden md:block w-px h-10 bg-slate-100" />
+                    <div className="text-center group">
+                        <p className="text-3xl font-black text-slate-900 tracking-tighter group-hover:text-orange-600 transition-colors">94%</p>
+                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">AI Sentiment Accuracy</p>
+                    </div>
+                </div>
             </div>
         </section >
     );

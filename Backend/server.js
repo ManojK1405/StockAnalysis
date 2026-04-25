@@ -1,14 +1,17 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import cron from 'node-cron';
-import { PrismaClient } from '@prisma/client';
 import { createServer } from 'http';
-import YahooFinance from 'yahoo-finance2';
+import { PrismaClient } from '@prisma/client';
+import { Server } from 'socket.io';
 
-const yahooFinance = new YahooFinance({ 
-    suppressNotices: ['yahooSurvey'],
-    validation: { logErrors: false }
+const app = express();
+const httpServer = createServer(app);
+export const io = new Server(httpServer, {
+  cors: {
+    origin: "*",
+    methods: ["GET", "POST"]
+  }
 });
 
 // Import Routes
@@ -22,23 +25,18 @@ import strategyRoutes from './routes/strategy.routes.js';
 import zerodhaRoutes from './routes/zerodha.routes.js';
 import newsletterRoutes from './routes/newsletter.routes.js';
 
-// Load environment variables
 dotenv.config();
-
-const app = express();
-const httpServer = createServer(app);
-
-// Initialize Socket.io
-import { Server } from 'socket.io';
-export const io = new Server(httpServer, {
-  cors: {
-    origin: "*",
-    methods: ["GET", "POST"]
-  }
-});
 
 const prisma = new PrismaClient();
 const PORT = process.env.PORT || 5001;
+
+// Import other deps after dotenv
+import YahooFinance from 'yahoo-finance2';
+const yahooFinance = new YahooFinance({ 
+    suppressNotices: ['yahooSurvey'],
+    validation: { logErrors: false }
+});
+import cron from 'node-cron';
 
 // Middlewares
 app.use(cors());
@@ -62,8 +60,10 @@ app.use('/api/newsletter', newsletterRoutes);
 // --- Background Jobs ---
 import { processPendingQueue } from './controllers/portfolio.controller.js';
 import { setupSocketHandlers } from './utils/socket.js';
+import { startAutoPilotService } from './services/autopilot.service.js';
 
 setupSocketHandlers();
+startAutoPilotService();
 
 // Market hours check every 5 minutes
 cron.schedule('*/5 * * * *', async () => {
@@ -86,17 +86,7 @@ cron.schedule('*/30 * * * *', async () => {
 
 const startServer = () => {
   httpServer.listen(PORT, () => {
-    console.log(`Server is listening on port ${PORT} `);
-  }).on('error', (err) => {
-    if (err.code === 'EADDRINUSE') {
-      console.error(`[Server] Port ${PORT} is currently occupied. Retrying in 1.5s...`);
-      setTimeout(() => {
-        httpServer.close();
-        startServer();
-      }, 1500);
-    } else {
-      console.error('[Server] Critical Startup Error:', err);
-    }
+    console.log(`Server is listening on port ${PORT}`);
   });
 };
 

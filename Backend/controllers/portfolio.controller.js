@@ -61,17 +61,25 @@ export const getPortfolio = async (req, res) => {
   const { mode = 'mock' } = req.query; // Default to mock mode
   try {
     const user = await prisma.user.findUnique({ where: { id: req.userId } });
+    if (!user) {
+        return res.status(404).json({ error: 'User not found' });
+    }
 
-    if (mode === 'live' && user && user.brokerType === 'zerodha' && user.brokerAccess) {
+    if (mode === 'live' && user.brokerType === 'zerodha' && user.brokerAccess) {
         try {
-            const [holdingsRaw, positionsRaw] = await Promise.all([
+            const [holdingsRaw, positionsRaw, marginsRaw] = await Promise.all([
                axios.get('https://api.kite.trade/portfolio/holdings', {
                  headers: { 'X-Kite-Version': '3', 'Authorization': `token ${user.brokerAccess}` }
                }),
                axios.get('https://api.kite.trade/portfolio/positions', {
                  headers: { 'X-Kite-Version': '3', 'Authorization': `token ${user.brokerAccess}` }
+               }),
+               axios.get('https://api.kite.trade/user/margins', {
+                 headers: { 'X-Kite-Version': '3', 'Authorization': `token ${user.brokerAccess}` }
                })
             ]);
+
+            const liveBalance = marginsRaw.data?.data?.equity?.available?.cash || 0;
 
             const mergedMap = {};
             
@@ -115,7 +123,13 @@ export const getPortfolio = async (req, res) => {
                 };
             });
             
-            return res.json(livePortfolio);
+            return res.json({
+                items: livePortfolio,
+                mockBalance: liveBalance,
+                liveBalance: liveBalance,
+                autoPilot: user.autoPilot,
+                tradingMode: user.tradingMode
+            });
         } catch (brokerErr) {
             console.error('Live fetch failed, falling back to mock:', brokerErr.message);
         }
@@ -124,7 +138,11 @@ export const getPortfolio = async (req, res) => {
     // Mock Mode (default or fallback)
     const portfolio = await prisma.portfolioItem.findMany({
       where: { userId: req.userId },
-      include: { stock: true }
+      include: { 
+          stock: {
+              select: { symbol: true, sector: true }
+          } 
+      }
     });
 
     const portfolioWithRealTime = await Promise.all(portfolio.map(async (item) => {
@@ -147,10 +165,199 @@ export const getPortfolio = async (req, res) => {
       }
     }));
 
-    res.json(portfolioWithRealTime);
+    res.json({
+      items: portfolioWithRealTime,
+      mockBalance: user.mockBalance,
+      autoPilot: user.autoPilot,
+      tradingMode: user.tradingMode
+    });
   } catch (error) {
     console.error('Get Portfolio Error:', error);
     res.status(500).json({ error: 'Failed to fetch portfolio' });
+  }
+};
+
+export const addMockBalance = async (req, res) => {
+  const { amount } = req.body;
+  try {
+    const user = await prisma.user.update({
+      where: { id: req.userId },
+      data: { mockBalance: { increment: parseFloat(amount) } }
+    });
+    res.json({ message: 'Balance updated', balance: user.mockBalance });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to update balance' });
+  }
+};
+
+export const toggleAutoPilot = async (req, res) => {
+  const { enabled, mode = 'mock' } = req.body;
+  try {
+    const user = await prisma.user.update({
+      where: { id: req.userId },
+      data: { 
+        autoPilot: enabled,
+        tradingMode: mode 
+      }
+    });
+    res.json({ 
+      message: `EquiTrade ${enabled ? 'Enabled' : 'Disabled'}`, 
+      autoPilot: user.autoPilot,
+      tradingMode: user.tradingMode
+    });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to toggle AutoPilot' });
+  }
+};
+
+export const setTradingMode = async (req, res) => {
+    const { mode } = req.body;
+    try {
+        const user = await prisma.user.update({
+            where: { id: req.userId },
+            data: { tradingMode: mode }
+        });
+        res.json({ message: `Switched to ${mode} mode`, mode: user.tradingMode });
+    } catch (e) {
+        res.status(500).json({ error: 'Failed to switch mode' });
+    }
+};
+
+export const buyMockStock = async (req, res) => {
+  const { symbol, quantity, price } = req.body;
+  const totalCost = quantity * price;
+
+  try {
+    if (!isMarketOpen()) {
+        await prisma.queuedTrade.create({
+            data: {
+                userId: req.userId,
+                trades: [{ symbol, quantity, price, action: 'BUY' }],
+                status: 'PENDING'
+            }
+        });
+        return res.json({ message: 'Market is closed. Order has been scheduled for market open.' });
+    }
+
+    const user = await prisma.user.findUnique({ where: { id: req.userId } });
+    if (user.mockBalance < totalCost) {
+      return res.status(400).json({ error: 'Insufficient mock balance' });
+    }
+
+    let stock = await prisma.stock.findUnique({ where: { symbol } });
+    if (!stock) stock = await prisma.stock.create({ data: { symbol } });
+
+    // Transactional update: deduct balance and add portfolio item
+    await prisma.$transaction([
+      prisma.user.update({
+        where: { id: req.userId },
+        data: { mockBalance: { decrement: totalCost } }
+      }),
+      prisma.portfolioItem.upsert({
+        where: { userId_stockId: { userId: req.userId, stockId: stock.id } },
+        update: {
+          quantity: { increment: quantity },
+          totalCost: { increment: totalCost },
+          avgPrice: { set: 0 } // Re-calculated after update in next step or via DB trigger
+        },
+        create: {
+          userId: req.userId,
+          stockId: stock.id,
+          quantity,
+          avgPrice: price,
+          totalCost
+        }
+      })
+    ]);
+
+    // Re-calculate avgPrice (simplified)
+    const updatedItem = await prisma.portfolioItem.findUnique({
+      where: { userId_stockId: { userId: req.userId, stockId: stock.id } }
+    });
+    await prisma.portfolioItem.update({
+      where: { id: updatedItem.id },
+      data: { avgPrice: updatedItem.totalCost / updatedItem.quantity }
+    });
+
+    res.json({ message: 'Order executed successfully' });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to execute buy order' });
+  }
+};
+
+export const sellMockStock = async (req, res) => {
+  const { symbol, quantity, price } = req.body;
+  try {
+    if (!isMarketOpen()) {
+        await prisma.queuedTrade.create({
+            data: {
+                userId: req.userId,
+                trades: [{ symbol, quantity, price, action: 'SELL' }],
+                status: 'PENDING'
+            }
+        });
+        return res.json({ message: 'Market is closed. Sale has been scheduled for market open.' });
+    }
+
+    let stock = await prisma.stock.findUnique({ where: { symbol } });
+    if (!stock) return res.status(404).json({ error: 'Stock not found' });
+
+    const item = await prisma.portfolioItem.findUnique({
+      where: { userId_stockId: { userId: req.userId, stockId: stock.id } }
+    });
+
+    if (!item || item.quantity < quantity) {
+      return res.status(400).json({ error: 'Insufficient quantity to sell' });
+    }
+
+    const sellProceeds = quantity * price;
+    const costOfGoodsSold = (item.totalCost / item.quantity) * quantity;
+
+    await prisma.$transaction([
+      prisma.user.update({
+        where: { id: req.userId },
+        data: { mockBalance: { increment: sellProceeds } }
+      }),
+      item.quantity === quantity 
+        ? prisma.portfolioItem.delete({ where: { id: item.id } })
+        : prisma.portfolioItem.update({
+            where: { id: item.id },
+            data: {
+              quantity: { decrement: quantity },
+              totalCost: { decrement: costOfGoodsSold }
+            }
+          })
+    ]);
+
+    res.json({ message: 'Sale executed successfully', proceeds: sellProceeds });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to execute sell order' });
+  }
+};
+
+export const skipTrade = async (req, res) => {
+  const { id } = req.params;
+  try {
+    await prisma.queuedTrade.update({
+      where: { id, userId: req.userId },
+      data: { status: 'SKIPPED' }
+    });
+    res.json({ message: 'Order skipped' });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to skip order' });
+  }
+};
+
+export const getTradeLogs = async (req, res) => {
+  try {
+    const logs = await prisma.tradeLog.findMany({
+      where: { userId: req.userId },
+      orderBy: { timestamp: 'desc' },
+      take: 50
+    });
+    res.json(logs);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch trade logs' });
   }
 };
 
@@ -201,38 +408,85 @@ export const syncBroker = async (req, res) => {
   let { brokerType, apiKey, apiSecret, requestToken } = req.body;
   if (!apiKey) return res.status(401).json({ error: 'API Key is missing' });
 
-  try {
-    if (apiKey === 'PERSISTED_IN_DB') {
-        const u = await prisma.user.findUnique({ where: { id: req.userId } });
-        if (!u || !u.brokerAccess) return res.status(401).json({ error: 'Stored session expired' });
-        apiKey = u.brokerAccess;
-    }
+  let expiryDate = null;
+  let positions = [];
+  let authenticatedAccessToken = null;
 
-    let positions = [];
-    let authenticatedAccessToken = null;
+  try {
+    const user = await prisma.user.findUnique({ where: { id: req.userId } });
+    let rawApiKey = apiKey;
+    let accessToken = null;
+
+    if (apiKey === 'PERSISTED_IN_DB') {
+        if (!user || !user.brokerApiKey) return res.status(401).json({ error: 'No stored credentials' });
+        rawApiKey = user.brokerApiKey;
+        accessToken = user.brokerAccess;
+    }
 
     if (brokerType === 'zerodha') {
       try {
-        let accessToken = apiKey; // Default fallback to original "apiKey:accessToken" passed as apiKey
-        
-        // If a request token is provided, execute the OAuth handshake to get the real access token
-        if (requestToken && apiSecret) {
+        const now = new Date();
+
+        if (requestToken) {
+            // STEP 1: Exchange Request Token for a reusable Access Token
+            const secretToUse = apiSecret || user?.brokerApiSecret;
+            if (!secretToUse) throw new Error('API Secret is required for first-time handshake.');
+
             const crypto = (await import('crypto')).default;
-            const checksum = crypto.createHash('sha256').update(apiKey + requestToken + apiSecret).digest('hex');
-            
+            const checksum = crypto.createHash('sha256').update(rawApiKey + requestToken + secretToUse).digest('hex');
+
             const params = new URLSearchParams();
-            params.append('api_key', apiKey);
+            params.append('api_key', rawApiKey);
             params.append('request_token', requestToken);
             params.append('checksum', checksum);
 
             const sessionResp = await axios.post('https://api.kite.trade/session/token', params, {
-                headers: {
-                    'X-Kite-Version': '3',
-                    'Content-Type': 'application/x-www-form-urlencoded'
-                }
+                headers: { 'X-Kite-Version': '3', 'Content-Type': 'application/x-www-form-urlencoded' }
             });
-            // Construct the canonical string Zerodha expects: "apiKey:accessToken"
-            accessToken = `${apiKey}:${sessionResp.data.data.access_token}`;
+
+            // Store the Access Token (format: apiKey:accessToken)
+            accessToken = `${rawApiKey}:${sessionResp.data.data.access_token}`;
+            authenticatedAccessToken = accessToken; // Mark for DB persistence
+
+            // Calculate Expiry: Zerodha sessions expire at 06:00 AM IST (00:30 UTC)
+            expiryDate = new Date();
+            expiryDate.setUTCHours(0, 30, 0, 0);
+            if (now.getUTCHours() > 0 || (now.getUTCHours() === 0 && now.getUTCMinutes() >= 30)) {
+                expiryDate.setUTCDate(expiryDate.getUTCDate() + 1);
+            }
+            console.log('[Zerodha] Handshake SUCCESS. Storing reusable Access Token. Expiry:', expiryDate);
+        } else if (user?.brokerAccess && (!user?.brokerAccessExpiry || user.brokerAccessExpiry > now)) {
+            // STEP 2: Reuse stored Access Token (The "Store once, use all day" logic)
+            console.log('[Zerodha] Attempting session reuse for user:', user.id);
+            try {
+                await axios.get('https://api.kite.trade/user/margins', {
+                    headers: { 'X-Kite-Version': '3', 'Authorization': `token ${user.brokerAccess}` }
+                });
+                accessToken = user.brokerAccess;
+                console.log('[Zerodha] Stored Access Token is still valid. Reusing session.');
+            } catch (err) {
+                console.log('[Zerodha] Stored session expired or invalid. Requiring fresh authorization.');
+                await prisma.user.update({
+                    where: { id: req.userId },
+                    data: { brokerAccess: null, brokerAccessExpiry: null }
+                });
+                return res.json({
+                    message: 'Broker session expired. Please re-authorize.',
+                    loginUrl: `https://kite.zerodha.com/connect/login?v=3&api_key=${rawApiKey}`
+                });
+            }
+        } else {
+            // No token and no valid session — return loginUrl so frontend can redirect
+            if (rawApiKey && apiSecret) {
+                await prisma.user.update({
+                    where: { id: req.userId },
+                    data: { brokerType, brokerApiKey: rawApiKey, brokerApiSecret: apiSecret }
+                });
+            }
+            return res.json({
+                message: 'Credentials saved. Please authorize on Zerodha.',
+                loginUrl: `https://kite.zerodha.com/connect/login?v=3&api_key=${rawApiKey}`
+            });
         }
 
         const [holdingsRaw, positionsRaw] = await Promise.all([
@@ -304,18 +558,25 @@ export const syncBroker = async (req, res) => {
       return res.status(400).json({ error: 'Unsupported broker type.' });
     }
 
-    // Write validated Session Keys directly into the relational Postgres DB for the user
-    await prisma.user.update({
-      where: { id: req.userId },
-      data: {
-         brokerType: brokerType,
-         brokerApiKey: apiKey,
-         brokerApiSecret: apiSecret || null,
-         brokerAccess: authenticatedAccessToken || apiKey
-      }
-    });
+    // Only update DB if we performed a fresh handshake
+    if (authenticatedAccessToken) {
+        await prisma.user.update({
+            where: { id: req.userId },
+            data: {
+                brokerType: brokerType,
+                brokerApiKey: rawApiKey,
+                brokerApiSecret: apiSecret || user?.brokerApiSecret || null,
+                brokerAccess: authenticatedAccessToken,
+                brokerAccessExpiry: expiryDate
+            }
+        });
+    }
 
-    res.json({ message: 'Live broker connected securely. Session preserved in DB.', synced: positions.length, accessToken: authenticatedAccessToken });
+    res.json({ 
+        message: 'Live broker connected securely.', 
+        synced: positions.length, 
+        accessToken: authenticatedAccessToken || accessToken 
+    });
   } catch (error) {
     console.error('Broker Sync Error:', error);
     res.status(500).json({ error: error.message || 'Failed to sync broker' });
@@ -424,13 +685,17 @@ export const processPendingQueue = async () => {
 
   const pending = await prisma.queuedTrade.findMany({
     where: { status: 'PENDING' },
+    include: { user: true },
     take: 10 // process in batches
   });
 
   for (const item of pending) {
     try {
       console.log(`[Queue] Executing strategy ${item.id} for user ${item.userId} via ${item.brokerType}`);
-      const results = await processTradesImmediately(item.brokerApiKey, item.brokerApiSecret, item.brokerType || 'zerodha', item.trades);
+      
+      // Use the session token (brokerAccess) if it exists, otherwise fall back to API Key
+      const authKey = item.user.brokerAccess || item.brokerApiKey;
+      const results = await processTradesImmediately(authKey, item.brokerApiSecret, item.brokerType || 'zerodha', item.trades);
       
       const failed = results.filter(r => r.status === 'FAILED');
       await prisma.queuedTrade.update({
@@ -484,4 +749,22 @@ export const dismissTrade = async (req, res) => {
   } catch (error) {
     res.status(500).json({ error: 'Failed to dismiss trade' });
   }
+};
+
+export const getBrokerOrders = async (req, res) => {
+    try {
+        const user = await prisma.user.findUnique({ where: { id: req.userId } });
+        if (!user || user.brokerType !== 'zerodha' || !user.brokerAccess) {
+            return res.json([]); // No live broker connected
+        }
+
+        const response = await axios.get('https://api.kite.trade/orders', {
+            headers: { 'X-Kite-Version': '3', 'Authorization': `token ${user.brokerAccess}` }
+        });
+
+        res.json(response.data.data || []);
+    } catch (error) {
+        console.error('Fetch Orders Error:', error);
+        res.status(500).json({ error: 'Failed to fetch broker orders' });
+    }
 };

@@ -33,23 +33,28 @@ model User {
   brokerType      String?
   brokerApiKey    String?
   brokerApiSecret String?
-  brokerAccess    String?
+  brokerAccess        String?
+  brokerAccessExpiry  DateTime?
+  mockBalance         Float    @default(100000) // Default 1 Lakh mock balance
+  autoPilot       Boolean  @default(false)
+  tradingMode     String   @default("mock") // mock or live
 
   watchlist Watchlist[]
   portfolio PortfolioItem[]
   alerts    Alert[]
   savedStrategies SavedStrategy[]
   queuedTrades    QueuedTrade[]
+  tradeLogs       TradeLog[]
 }
 
 model QueuedTrade {
   id           String   @id @default(uuid())
   userId       String
-  trades          Json     // Array of trades: { symbol, quantity, price, action }
+  trades          Json     // Array of trades: { symbol, quantity, price, action, id (internal) }
   brokerApiKey    String?  // Optional: stored for background execution
   brokerApiSecret String?  // Optional: stored for background execution
   brokerType      String   @default("zerodha") // zerodha, groww
-  status          String   @default("PENDING") // PENDING, EXECUTED, FAILED
+  status          String   @default("PENDING") // PENDING, EXECUTED, FAILED, SKIPPED
   error        String?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
@@ -144,6 +149,22 @@ model SavedStrategy {
   user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
+
+model TradeLog {
+  id           String   @id @default(uuid())
+  userId       String
+  symbol       String
+  action       String   // BUY or SELL
+  quantity     Float
+  price        Float
+  totalAmount  Float
+  type         String   @default("MOCK") // MOCK or LIVE
+  mode         String   @default("MANUAL") // MANUAL or AI_PILOT
+  reason       String?  // The "Research" behind the trade
+  timestamp    DateTime @default(now())
+
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
 
 model NewsletterSubscription {
   id        String   @id @default(uuid())

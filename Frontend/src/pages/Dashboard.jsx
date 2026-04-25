@@ -750,7 +750,6 @@ const ExpandableCard = ({ card, analysis, onClick }) => {
     const colorMap = {
         orange: { bg: 'bg-orange-50', text: 'text-orange-600', ring: 'ring-orange-500/10', border: 'hover:border-orange-200', btn: 'group-hover:bg-orange-50 group-hover:text-orange-600' },
         emerald: { bg: 'bg-emerald-50', text: 'text-emerald-600', ring: 'ring-emerald-500/10', border: 'hover:border-emerald-200', btn: 'group-hover:bg-emerald-50 group-hover:text-emerald-600' },
-        orange: { bg: 'bg-orange-50', text: 'text-orange-600', ring: 'ring-orange-500/10', border: 'hover:border-orange-200', btn: 'group-hover:bg-orange-50 group-hover:text-orange-600' },
         fuchsia: { bg: 'bg-fuchsia-50', text: 'text-fuchsia-600', ring: 'ring-fuchsia-500/10', border: 'hover:border-fuchsia-200', btn: 'group-hover:bg-fuchsia-50 group-hover:text-fuchsia-600' },
     };
 

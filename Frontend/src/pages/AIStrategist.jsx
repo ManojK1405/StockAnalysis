@@ -255,27 +255,28 @@ const AIStrategist = () => {
                                                 className="bg-white border border-slate-200 rounded-[32px] overflow-hidden shadow-2xl shadow-slate-900/5 flex flex-col"
                                             >
                                                 {/* Dark header */}
-                                                <div className="p-10 bg-slate-900 text-white relative overflow-hidden shrink-0">
-                                                    <div className="absolute top-0 right-0 w-64 h-64 bg-rose-500/20 blur-[100px] rounded-full" />
-                                                    <div className="absolute bottom-0 left-0 w-48 h-48 bg-orange-500/20 blur-[80px] rounded-full" />
+                                                {/* Light header */}
+                                                <div className="p-10 bg-slate-50 text-slate-900 relative overflow-hidden shrink-0 border-b border-slate-100">
+                                                    <div className="absolute top-0 right-0 w-64 h-64 bg-rose-500/5 blur-[100px] rounded-full" />
+                                                    <div className="absolute bottom-0 left-0 w-48 h-48 bg-orange-500/5 blur-[80px] rounded-full" />
 
                                                     <div className="relative z-10">
                                                         <div className="flex justify-between items-start mb-8">
                                                             <div className="max-w-[55%]">
                                                                 <div className="flex gap-3 mb-4">
-                                                                    <span className="px-3 py-1 bg-white/10 backdrop-blur-md border border-white/10 rounded-lg text-[10px] font-black text-rose-300 uppercase tracking-widest">
+                                                                    <span className="px-3 py-1 bg-white border border-slate-200 rounded-lg text-[10px] font-black text-rose-600 uppercase tracking-widest shadow-sm">
                                                                         {strategy.riskScore} Risk
                                                                     </span>
-                                                                    <span className="px-3 py-1 bg-white/10 backdrop-blur-md border border-white/10 rounded-lg text-[10px] font-black text-orange-300 uppercase tracking-widest">
+                                                                    <span className="px-3 py-1 bg-white border border-slate-200 rounded-lg text-[10px] font-black text-orange-600 uppercase tracking-widest shadow-sm">
                                                                         {strategy.horizon}
                                                                     </span>
                                                                 </div>
-                                                                <h4 className="font-black text-white text-3xl tracking-tight leading-tight">{strategy.strategyTitle}</h4>
+                                                                <h4 className="font-black text-slate-900 text-3xl tracking-tight leading-tight uppercase italic underline decoration-rose-500 decoration-4 underline-offset-8 mb-4">{strategy.strategyTitle}</h4>
                                                             </div>
                                                             <div className="flex gap-4 text-right shrink-0">
-                                                                <div className="bg-white/5 backdrop-blur-xl px-6 py-5 rounded-2xl border border-white/10 shadow-2xl min-w-[140px] flex flex-col justify-center">
+                                                                <div className="bg-white px-6 py-5 rounded-[24px] border border-slate-100 shadow-xl min-w-[140px] flex flex-col justify-center">
                                                                     <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Target CAGR</p>
-                                                                    <p className="font-black text-emerald-400 text-xl">{strategy.projectedReturnRange}</p>
+                                                                    <p className="font-black text-emerald-600 text-2xl">{strategy.projectedReturnRange}</p>
                                                                 </div>
                                                                 {(() => {
                                                                     const matches = strategy.projectedReturnRange.match(/\d+(\.\d+)?/g);
@@ -283,15 +284,15 @@ const AIStrategist = () => {
                                                                     const avgRate = (matches.reduce((a, b) => a + parseFloat(b), 0) / matches.length) / 100;
                                                                     const fv = parseFloat(mandate.amount) * Math.pow(1 + avgRate, parseFloat(mandate.horizon));
                                                                     return (
-                                                                        <div className="bg-white/5 backdrop-blur-xl px-6 py-5 rounded-2xl border border-white/10 shadow-2xl min-w-[140px] flex flex-col justify-center">
+                                                                        <div className="bg-white px-6 py-5 rounded-[24px] border border-slate-100 shadow-xl min-w-[140px] flex flex-col justify-center">
                                                                             <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Est. {mandate.horizon}Y Value</p>
-                                                                            <p className="font-black text-emerald-400 text-xl">{formatINR(fv)}</p>
+                                                                            <p className="font-black text-emerald-600 text-2xl">{formatINR(fv)}</p>
                                                                         </div>
                                                                     );
                                                                 })()}
                                                             </div>
                                                         </div>
-                                                        <p className="text-slate-300 font-medium leading-relaxed text-sm max-w-2xl">{strategy.summary}</p>
+                                                        <p className="text-slate-600 font-bold leading-relaxed text-sm max-w-2xl">{strategy.summary}</p>
                                                     </div>
                                                 </div>
 
