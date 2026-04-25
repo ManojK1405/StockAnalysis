@@ -1,6 +1,5 @@
 import { Routes, Route } from "react-router-dom";
 import ScrollToTop from "./components/scroll-to-top";
-import Banner from "./components/banner";
 import LenisScroll from "./components/lenis-scroll";
 import Navbar from "./components/navbar";
 import Footer from "./components/footer";
@@ -28,7 +27,6 @@ export default function App() {
             <AuthProvider>
                 <ScrollToTop />
                 <LenisScroll />
-                <Banner />
                 <Navbar />
                 <AuthModal />
                 <main className='min-h-screen bg-white'>
@@ -38,7 +36,7 @@ export default function App() {
                         <Route path="/portfolio" element={<Portfolio />} />
                         <Route path="/products/intraday-pulse" element={<IntradayPulse />} />
                         <Route path="/products/ai-strategist" element={<AIStrategist />} />
-                        <Route path="/products/reverse-strategist" element={<ReverseStrategist />} />
+                        <Route path="/products/goal-backcaster" element={<ReverseStrategist />} />
                         <Route path="/products/backtester" element={<Backtester />} />
                         <Route path="/about-us" element={<AboutUs />} />
                         <Route path="/our-vision" element={<OurVision />} />

@@ -1,9 +1,10 @@
 import { MinusIcon, PlusIcon } from 'lucide-react';
 import { useState } from 'react';
 import SectionTitle from '../components/section-title';
+import { motion, AnimatePresence } from 'framer-motion';
 
 export default function FaqSection() {
-    const [isOpen, setIsOpen] = useState(false);
+    const [isOpen, setIsOpen] = useState(null);
     const data = [
         {
             question: 'How accurate is the AI sentiment analysis?',
@@ -28,16 +29,38 @@ export default function FaqSection() {
     ];
 
     return (
-        <section className='flex flex-col items-center justify-center mt-40'>
+        <section className='flex flex-col items-center justify-center mt-40 pb-20'>
             <SectionTitle title="Common Queries" subtitle="Everything you need to know about navigating the market with EquiSense intelligence." />
-            <div className='mx-auto mt-12 w-full max-w-xl'>
+            <div className='mx-auto mt-12 w-full max-w-2xl px-6'>
                 {data.map((item, index) => (
-                    <div key={index} className='flex flex-col border-b border-gray-200 bg-white'>
-                        <h3 className='flex cursor-pointer items-start justify-between gap-4 py-4 font-medium' onClick={() => setIsOpen(isOpen === index ? null : index)}>
-                            {item.question}
-                            {isOpen === index ? <MinusIcon className='size-5 text-gray-500' /> : <PlusIcon className='size-5 text-gray-500' />}
-                        </h3>
-                        <p className={`pb-4 text-sm/6 text-gray-500 ${isOpen === index ? 'block' : 'hidden'}`}>{item.answer}</p>
+                    <div key={index} className='border-b border-slate-100 last:border-0'>
+                        <button 
+                            className='flex w-full items-center justify-between gap-4 py-6 text-left group'
+                            onClick={() => setIsOpen(isOpen === index ? null : index)}
+                        >
+                            <span className={`text-lg font-bold tracking-tight transition-colors ${isOpen === index ? 'text-orange-600' : 'text-slate-800 group-hover:text-orange-500'}`}>
+                                {item.question}
+                            </span>
+                            <div className={`p-2 rounded-full transition-all ${isOpen === index ? 'bg-orange-600 text-white rotate-180' : 'bg-slate-50 text-slate-400'}`}>
+                                {isOpen === index ? <MinusIcon className='size-4' /> : <PlusIcon className='size-4' />}
+                            </div>
+                        </button>
+                        
+                        <AnimatePresence>
+                            {isOpen === index && (
+                                <motion.div
+                                    initial={{ height: 0, opacity: 0 }}
+                                    animate={{ height: 'auto', opacity: 1 }}
+                                    exit={{ height: 0, opacity: 0 }}
+                                    transition={{ duration: 0.3, ease: [0.04, 0.62, 0.23, 0.98] }}
+                                    className="overflow-hidden"
+                                >
+                                    <div className="pb-6 text-slate-500 leading-relaxed font-medium">
+                                        {item.answer}
+                                    </div>
+                                </motion.div>
+                            )}
+                        </AnimatePresence>
                     </div>
                 ))}
             </div>

@@ -24,12 +24,12 @@ export default function ContactUs() {
                         <div className="p-8 bg-slate-50 rounded-[40px] border border-slate-100 hover:border-orange-200 transition-colors group">
                             <Mail className="w-8 h-8 text-orange-500 mb-6 group-hover:scale-110 transition-transform" />
                             <h3 className="text-sm font-black text-slate-900 uppercase tracking-widest mb-2">Email Support</h3>
-                            <p className="text-slate-500 font-bold">support@equisense.com</p>
+                            <p className="text-slate-500 font-bold">manojkalasgonda7@gmail.com</p>
                         </div>
                         <div className="p-8 bg-slate-50 rounded-[40px] border border-slate-100 hover:border-rose-200 transition-colors group">
                             <MessageSquare className="w-8 h-8 text-rose-500 mb-6 group-hover:scale-110 transition-transform" />
                             <h3 className="text-sm font-black text-slate-900 uppercase tracking-widest mb-2">Institutional Inquiries</h3>
-                            <p className="text-slate-500 font-bold">partners@equisense.com</p>
+                            <p className="text-slate-500 font-bold">manojkalasgonda7@gmail.com</p>
                         </div>
                     </div>
 

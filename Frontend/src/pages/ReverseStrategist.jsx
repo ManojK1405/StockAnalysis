@@ -89,9 +89,9 @@ const ReverseStrategist = () => {
                             </div>
 
                             <h1 className="text-5xl font-black text-slate-900 tracking-tighter leading-tight mb-8 pb-2">
-                                Reverse{' '}
+                                Goal{' '}
                                 <span className="text-premium italic">
-                                    Strategist
+                                    Backcaster
                                 </span>
                             </h1>
 

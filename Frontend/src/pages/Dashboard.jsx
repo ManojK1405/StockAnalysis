@@ -200,7 +200,7 @@ const Dashboard = () => {
                                                     {analysis.signal}
                                                 </div>
                                                 <Link 
-                                                    to="/strategist" 
+                                                    to="/products/ai-strategist" 
                                                     className="flex items-center justify-center gap-2 px-6 py-3 rounded-2xl bg-orange-50 border border-orange-100 text-[10px] font-black text-orange-600 uppercase tracking-widest hover:bg-orange-600 hover:text-white transition-all group/cta"
                                                 >
                                                     <Zap className="w-3.5 h-3.5 fill-current animate-pulse" />

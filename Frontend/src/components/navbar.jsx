@@ -1,5 +1,5 @@
 import { MenuIcon, XIcon, ChevronDown, Activity, Brain, Target, LayoutDashboard, Briefcase, History, BarChart2, LogOut, User as UserIcon } from 'lucide-react';
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -10,6 +10,24 @@ export default function Navbar() {
     const [showProfileMenu, setShowProfileMenu] = useState(false);
     const { user, logout, setShowAuthModal } = useAuth();
     const navigate = useNavigate();
+    const profileMenuRef = useRef(null);
+
+    // Close profile menu on click outside
+    useEffect(() => {
+        const handleClickOutside = (event) => {
+            if (profileMenuRef.current && !profileMenuRef.current.contains(event.target)) {
+                setShowProfileMenu(false);
+            }
+        };
+
+        if (showProfileMenu) {
+            document.addEventListener('mousedown', handleClickOutside);
+        }
+
+        return () => {
+            document.removeEventListener('mousedown', handleClickOutside);
+        };
+    }, [showProfileMenu]);
 
     const links = [
         { name: 'Home', href: '/' },
@@ -20,7 +38,7 @@ export default function Navbar() {
                 { name: 'Portfolio Hub', href: '/portfolio', icon: Briefcase, description: 'Live tracking & paper trading' },
                 { name: 'Intraday Pulse', href: '/products/intraday-pulse', icon: Activity, description: 'Real-time market momentum' },
                 { name: 'AI Strategist', href: '/products/ai-strategist', icon: Brain, description: 'AI-driven custom logic' },
-                { name: 'Reverse Strategist', href: '/products/reverse-strategist', icon: History, description: 'Goal-based wealth backcasting' },
+                { name: 'Goal Backcaster', href: '/products/goal-backcaster', icon: History, description: 'Goal-based wealth backcasting' },
                 { name: 'Backtester', href: '/products/backtester', icon: BarChart2, description: 'Simulate strategies on historical data' },
             ],
         },
@@ -74,7 +92,7 @@ export default function Navbar() {
 
                 <div className='flex items-center gap-4'>
                     {user ? (
-                        <div className='relative'>
+                        <div className='relative' ref={profileMenuRef}>
                             <button 
                                 onClick={() => setShowProfileMenu(!showProfileMenu)}
                                 className='flex items-center gap-2 p-1 pr-3 rounded-full bg-slate-100 hover:bg-slate-200 transition-colors'
