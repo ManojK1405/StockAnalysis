@@ -1,8 +1,10 @@
-import React, { useState } from 'react';
-import { Brain, Sparkles, Zap, TrendingUp, ShieldCheck, Layers, Share2, Download, RefreshCw, Save, History } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Brain, Sparkles, Zap, TrendingUp, ShieldCheck, Layers, Share2, Download, RefreshCw, Save, History, PlayCircle, ShieldAlert } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import api from '../api';
 import FeatureLock from '../components/feature-lock';
+import { useAuth } from '../context/AuthContext';
+import { toast } from 'react-hot-toast';
 
 const formatINR = (val) => {
     if (val >= 10000000) return `₹${(val / 10000000).toFixed(2)} Cr`;
@@ -11,6 +13,7 @@ const formatINR = (val) => {
 };
 
 const AIStrategist = () => {
+    const { user } = useAuth();
     const [loading, setLoading] = useState(false);
     const [mandate, setMandate] = useState({
         amount: '500000',
@@ -21,6 +24,9 @@ const AIStrategist = () => {
     const [strategy, setStrategy] = useState(null);
     const [backtestData, setBacktestData] = useState(null);
     const [backtestLoading, setBacktestLoading] = useState(false);
+    const [executionMode, setExecutionMode] = useState('mock'); // mock | live
+    const [executing, setExecuting] = useState(false);
+    const [showConfirmModal, setShowConfirmModal] = useState(false);
 
     const runBacktest = async () => {
         if (!strategy) return;
@@ -34,7 +40,7 @@ const AIStrategist = () => {
             setBacktestData(res.data);
         } catch (e) {
             console.error(e);
-            alert('Backtest Engine Error: Unable to complete historical simulation.');
+            toast.error('Backtest Engine Error: Unable to complete historical simulation.');
         } finally {
             setBacktestLoading(false);
         }
@@ -47,9 +53,10 @@ const AIStrategist = () => {
             const payload = { ...mandate, sector: mandate.sectors.join(', ') };
             const res = await api.post('/strategy/generate', payload);
             setStrategy(res.data);
+            toast.success('Strategy Blueprint Generated');
         } catch (e) {
             console.error(e);
-            alert('Strategy Execution Error: Unable to resolve market liquidity for the requested mandate.');
+            toast.error('Strategy Execution Error: Unable to resolve market liquidity.');
         } finally {
             setLoading(false);
         }
@@ -63,10 +70,41 @@ const AIStrategist = () => {
                 strategyData,
                 isPublic: false
             });
-            alert('Strategy saved successfully to your vault.');
+            toast.success('Strategy saved to your vault.');
         } catch (e) {
             console.error('Save error', e);
-            alert('Failed to save strategy.');
+            toast.error('Failed to save strategy.');
+        }
+    };
+
+    const handleDeployRequest = () => {
+        if (!strategy) return;
+        if (executionMode === 'live' && !user?.brokerApiKey) {
+            toast.error('Broker Not Connected. Visit Settings to link your account.');
+            return;
+        }
+        setShowConfirmModal(true);
+    };
+
+    const deployStrategy = async () => {
+        setShowConfirmModal(false);
+        setExecuting(true);
+        try {
+            const res = await api.post('/portfolio/execute-strategy', {
+                mode: executionMode,
+                trades: strategy.allocation,
+                totalCapital: parseFloat(mandate.amount)
+            });
+            
+            if (res.data.isQueued) {
+                toast.success('Market Closed. Strategy queued for next session.', { icon: '⏳' });
+            } else {
+                toast.success(res.data.message || 'Strategy Deployed Successfully!', { icon: '🚀' });
+            }
+        } catch (e) {
+            toast.error(e.response?.data?.error || 'Deployment Failed. Verify funds and connection.');
+        } finally {
+            setExecuting(false);
         }
     };
 
@@ -78,6 +116,91 @@ const AIStrategist = () => {
                 <div className="absolute bottom-0 left-0 w-[800px] h-[800px] bg-orange-500/5 blur-[150px] rounded-full -ml-48 -mb-48" />
                 <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full h-full opacity-[0.03] bg-[url('https://www.transparenttextures.com/patterns/carbon-fibre.png')]" />
             </div>
+
+            {/* Confirmation Modal */}
+            <AnimatePresence>
+                {showConfirmModal && (
+                    <div className="fixed inset-0 z-[100] flex items-center justify-center p-6">
+                        <motion.div 
+                            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                            onClick={() => setShowConfirmModal(false)}
+                            className="absolute inset-0 bg-slate-900/60 backdrop-blur-md"
+                        />
+                        <motion.div 
+                            initial={{ opacity: 0, scale: 0.9, y: 20 }}
+                            animate={{ opacity: 1, scale: 1, y: 0 }}
+                            exit={{ opacity: 0, scale: 0.9, y: 20 }}
+                            className="relative w-full max-w-2xl bg-white rounded-[40px] shadow-2xl overflow-hidden border border-slate-200"
+                        >
+                            <div className="p-10 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
+                                <div className="flex items-center gap-4">
+                                    <div className={`p-3 rounded-2xl ${executionMode === 'live' ? 'bg-emerald-500/10 text-emerald-600' : 'bg-slate-900/10 text-slate-900'}`}>
+                                        <ShieldCheck className="w-6 h-6" />
+                                    </div>
+                                    <div>
+                                        <h3 className="text-xl font-black text-slate-900 uppercase tracking-tight">Confirm Execution</h3>
+                                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Verify {executionMode} mode deployment</p>
+                                    </div>
+                                </div>
+                                <button onClick={() => setShowConfirmModal(false)} className="text-slate-400 hover:text-slate-900 transition-colors">
+                                    <RefreshCw className="w-5 h-5 rotate-45" />
+                                </button>
+                            </div>
+
+                            <div className="p-10 max-h-[60vh] overflow-y-auto">
+                                <div className="mb-8 p-6 bg-slate-50 rounded-3xl border border-slate-100">
+                                    <div className="flex justify-between items-center mb-2">
+                                        <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Total Commitment</span>
+                                        <span className="font-black text-slate-900 text-lg">₹{Number(mandate.amount).toLocaleString()}</span>
+                                    </div>
+                                    <div className="flex justify-between items-center">
+                                        <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Execution Mode</span>
+                                        <span className={`px-3 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest ${executionMode === 'live' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-700'}`}>
+                                            {executionMode}
+                                        </span>
+                                    </div>
+                                </div>
+
+                                <div className="space-y-4">
+                                    <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Order Breakdown</h4>
+                                    {strategy.allocation.map((asset, idx) => (
+                                        <div key={idx} className="flex items-center justify-between p-4 rounded-2xl bg-white border border-slate-100 shadow-sm">
+                                            <div className="flex items-center gap-4">
+                                                <div className="w-10 h-10 rounded-xl bg-slate-900 text-white flex items-center justify-center font-black text-xs">
+                                                    {asset.name[0]}
+                                                </div>
+                                                <div>
+                                                    <p className="font-black text-slate-900 text-sm leading-none mb-1">{asset.displayName}</p>
+                                                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">{asset.name} • {asset.weight}% Weight</p>
+                                                </div>
+                                            </div>
+                                            <div className="text-right">
+                                                <p className="font-black text-slate-900 text-sm">₹{asset.amount.toLocaleString()}</p>
+                                                <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Est. Buy</p>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+
+                            <div className="p-10 bg-slate-50 flex gap-4 border-t border-slate-100">
+                                <button 
+                                    onClick={() => setShowConfirmModal(false)}
+                                    className="flex-1 py-4 bg-white border border-slate-200 rounded-2xl text-slate-600 font-black text-[10px] uppercase tracking-widest hover:bg-slate-100 transition-all"
+                                >
+                                    Cancel
+                                </button>
+                                <button 
+                                    onClick={deployStrategy}
+                                    className={`flex-[2] py-4 rounded-2xl text-white font-black text-[10px] uppercase tracking-[0.2em] shadow-xl transition-all hover:scale-[1.02] active:scale-[0.98] ${executionMode === 'live' ? 'bg-emerald-600 shadow-emerald-900/20' : 'bg-slate-900 shadow-slate-900/20'}`}
+                                >
+                                    {executionMode === 'live' ? 'Confirm & Transmit to Broker' : 'Confirm Mock Deployment'}
+                                </button>
+                            </div>
+                        </motion.div>
+                    </div>
+                )}
+            </AnimatePresence>
 
             <div className="max-w-7xl mx-auto px-6 pt-32 pb-24 relative z-10">
                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-16 items-start">
@@ -202,7 +325,7 @@ const AIStrategist = () => {
 
                     {/* ── Right Column: Output Terminal ── */}
                     <div className="lg:col-span-7">
-                        <FeatureLock featureName="AI Strategy Engine" description="Unlock institutional-grade investment orangeprints and historical backtest simulations.">
+                        <FeatureLock featureName="AI Strategy Engine" description="Unlock institutional-grade investment blueprints and historical backtest simulations.">
                             <motion.div
                                 initial={{ opacity: 0, scale: 0.98, y: 20 }}
                                 animate={{ opacity: 1, scale: 1, y: 0 }}
@@ -254,7 +377,6 @@ const AIStrategist = () => {
                                             <motion.div key="result" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
                                                 className="bg-white border border-slate-200 rounded-[32px] overflow-hidden shadow-2xl shadow-slate-900/5 flex flex-col"
                                             >
-                                                {/* Dark header */}
                                                 {/* Light header */}
                                                 <div className="p-10 bg-slate-50 text-slate-900 relative overflow-hidden shrink-0 border-b border-slate-100">
                                                     <div className="absolute top-0 right-0 w-64 h-64 bg-rose-500/5 blur-[100px] rounded-full" />
@@ -335,7 +457,7 @@ const AIStrategist = () => {
                                                         <p className="text-sm text-slate-700 font-medium leading-relaxed">{strategy.marketOutlook}</p>
                                                     </div>
 
-                                                    {/* Backtest result (from "Run Backtest" on this generated strategy) */}
+                                                    {/* Backtest result */}
                                                     {backtestData && (
                                                         <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} className="mb-8">
                                                             <div className="p-6 bg-gradient-to-br from-rose-50 to-orange-50 rounded-2xl border border-rose-100">
@@ -361,8 +483,72 @@ const AIStrategist = () => {
                                                         </motion.div>
                                                     )}
 
+                                                    {/* Execution Terminal */}
+                                                    <div className="mb-10 p-8 rounded-[40px] bg-slate-900 text-white relative overflow-hidden shadow-2xl">
+                                                        <div className="absolute top-0 right-0 w-64 h-64 bg-rose-500/10 blur-[100px] rounded-full -mr-32 -mt-32" />
+                                                        
+                                                        <div className="relative z-10">
+                                                            <div className="flex items-center justify-between mb-8">
+                                                                <div className="flex items-center gap-4">
+                                                                    <div className="p-3 bg-white/10 rounded-2xl backdrop-blur-md">
+                                                                        <Zap className="w-6 h-6 text-orange-400 fill-current" />
+                                                                    </div>
+                                                                    <div>
+                                                                        <h6 className="text-lg font-black uppercase italic tracking-tight">Execution Terminal</h6>
+                                                                        <p className="text-[10px] font-black text-white/40 uppercase tracking-widest">Deploy Blueprint to Portfolio</p>
+                                                                    </div>
+                                                                </div>
+                                                                <div className="flex bg-white/5 p-1 rounded-2xl border border-white/10">
+                                                                    <button 
+                                                                        onClick={() => setExecutionMode('mock')}
+                                                                        className={`px-6 py-2.5 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all ${executionMode === 'mock' ? 'bg-white text-slate-900 shadow-xl' : 'text-white/40 hover:text-white'}`}
+                                                                    >
+                                                                        Mock Deck
+                                                                    </button>
+                                                                    <button 
+                                                                        onClick={() => setExecutionMode('live')}
+                                                                        className={`px-6 py-2.5 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all ${executionMode === 'live' ? 'bg-emerald-600 text-white shadow-xl' : 'text-white/40 hover:text-white'}`}
+                                                                    >
+                                                                        Live Sync
+                                                                    </button>
+                                                                </div>
+                                                            </div>
+
+                                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+                                                                <div className="p-6 bg-white/5 rounded-3xl border border-white/5">
+                                                                    <p className="text-[9px] font-black text-white/40 uppercase tracking-widest mb-2">Requirement</p>
+                                                                    <p className="text-2xl font-black">₹{Number(mandate.amount).toLocaleString()}</p>
+                                                                </div>
+                                                                <div className="p-6 bg-white/5 rounded-3xl border border-white/5">
+                                                                    <p className="text-[9px] font-black text-white/40 uppercase tracking-widest mb-2">Availability ({executionMode.toUpperCase()})</p>
+                                                                    <p className={`text-2xl font-black ${executionMode === 'mock' ? (user?.mockBalance >= Number(mandate.amount) ? 'text-emerald-400' : 'text-rose-400') : (user?.brokerAccess ? 'text-emerald-400' : 'text-rose-400')}`}>
+                                                                        {executionMode === 'mock' ? `₹${user?.mockBalance?.toLocaleString() || '0'}` : (user?.brokerAccess ? 'Broker Linked' : 'No Connection')}
+                                                                    </p>
+                                                                </div>
+                                                            </div>
+
+                                                            {executionMode === 'live' && !user?.brokerAccess && (
+                                                                <div className="flex items-center gap-3 p-4 bg-rose-500/10 border border-rose-500/20 rounded-2xl mb-8">
+                                                                    <ShieldAlert className="w-5 h-5 text-rose-500" />
+                                                                    <p className="text-[10px] font-black text-rose-200 uppercase tracking-widest leading-relaxed">
+                                                                        Broker authentication required. Please visit the <span className="text-rose-500 underline">Settings</span> page to establish a secure handshake.
+                                                                    </p>
+                                                                </div>
+                                                            )}
+
+                                                            <button 
+                                                                onClick={handleDeployRequest}
+                                                                disabled={executing || (executionMode === 'live' && !user?.brokerAccess)}
+                                                                className={`w-full py-6 rounded-[24px] font-black text-xs uppercase tracking-[0.3em] transition-all flex items-center justify-center gap-4 shadow-2xl active:scale-95 ${executing ? 'bg-slate-800 text-white/50 cursor-not-allowed' : 'bg-gradient-to-r from-orange-600 to-rose-600 text-white hover:shadow-orange-600/20'}`}
+                                                            >
+                                                                {executing ? <RefreshCw className="w-5 h-5 animate-spin" /> : <PlayCircle className="w-6 h-6" />}
+                                                                {executing ? 'Transmitting...' : `Deploy strategy in ${executionMode} Mode`}
+                                                            </button>
+                                                        </div>
+                                                    </div>
+
                                                     {/* Actions */}
-                                                    <div className="flex justify-end gap-4">
+                                                    <div className="flex justify-end gap-4 border-t border-slate-100 pt-8">
                                                         <button
                                                             onClick={runBacktest}
                                                             disabled={backtestLoading}
@@ -373,7 +559,7 @@ const AIStrategist = () => {
                                                         </button>
                                                         <button
                                                             onClick={() => saveStrategyToDB(strategy)}
-                                                            className="px-8 py-4 bg-slate-900 text-white rounded-2xl text-[11px] font-black uppercase tracking-[0.2em] hover:bg-rose-600 hover:shadow-xl hover:shadow-rose-900/20 hover:-translate-y-1 transition-all flex items-center gap-3"
+                                                            className="px-8 py-4 bg-white text-slate-900 border border-slate-200 rounded-2xl text-[11px] font-black uppercase tracking-[0.2em] hover:bg-slate-50 transition-all flex items-center gap-3"
                                                         >
                                                             <Save className="w-4 h-4" />
                                                             Save to Vault

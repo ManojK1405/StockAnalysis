@@ -35,7 +35,7 @@ model User {
   brokerApiSecret String?
   brokerAccess        String?
   brokerAccessExpiry  DateTime?
-  mockBalance         Float    @default(100000) // Default 1 Lakh mock balance
+  mockBalance         Float    @default(10000)  // Starting mock balance set to 10,000
   autoPilot       Boolean  @default(false)
   tradingMode     String   @default("mock") // mock or live
 

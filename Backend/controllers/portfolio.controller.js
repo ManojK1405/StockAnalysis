@@ -583,38 +583,165 @@ export const syncBroker = async (req, res) => {
   }
 };
 
+export const disconnectBroker = async (req, res) => {
+    try {
+        await prisma.user.update({
+            where: { id: req.userId },
+            data: {
+                brokerType: null,
+                brokerApiKey: null,
+                brokerApiSecret: null,
+                brokerAccess: null,
+                brokerAccessExpiry: null,
+                tradingMode: 'mock' // Revert to mock mode on disconnect
+            }
+        });
+        res.json({ message: 'Broker disconnected and credentials purged.' });
+    } catch (error) {
+        console.error('Broker Disconnect Error:', error);
+        res.status(500).json({ error: 'Failed to disconnect broker' });
+    }
+};
+
 export const executeStrategy = async (req, res) => {
-  const { apiKey, apiSecret, brokerType = 'zerodha', trades } = req.body;
-  if (!apiKey) return res.status(401).json({ error: 'Broker credentials (API Key/Token) are required.' });
+  const { mode = 'mock', trades, totalCapital } = req.body;
+  
   if (!trades || !Array.isArray(trades)) return res.status(400).json({ error: 'Invalid trades payload.' });
 
   try {
-    if (isMarketOpen()) {
-      const results = await processTradesImmediately(apiKey, apiSecret, brokerType, trades);
-      return res.json({ 
-        message: `Market is open. Execution via ${brokerType === 'zerodha' ? 'Zerodha' : 'Groww'} completed.`, 
-        results 
-      });
-    } else {
-      // Queue for later
-      await prisma.queuedTrade.create({
-        data: {
-          user: { connect: { id: req.userId } },
-          trades,
-          brokerApiKey: apiKey,
-          brokerApiSecret: apiSecret,
-          brokerType,
-          status: 'PENDING'
+    const user = await prisma.user.findUnique({ where: { id: req.userId } });
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    if (mode === 'mock') {
+      const capital = totalCapital || trades.reduce((sum, t) => sum + (t.amount || 0), 0);
+      if (user.mockBalance < capital) {
+        return res.status(400).json({ error: `Insufficient mock funds. Required: ₹${capital.toLocaleString()}, Available: ₹${user.mockBalance.toLocaleString()}` });
+      }
+
+      // Step 1: Prepare all data outside the transaction (Avoid network requests inside TX)
+      const executionResults = [];
+      const preparedTrades = [];
+
+      for (const trade of trades) {
+        const symbol = trade.name;
+        let price = trade.price;
+        
+        if (!price) {
+          try {
+            const quote = await yahooFinance.quote(symbol);
+            price = quote?.regularMarketPrice;
+          } catch (e) {
+            console.error(`[Mock Execution] Price fetch failed for ${symbol}:`, e.message);
+          }
+          // Final fallback
+          if (!price) price = (trade.amount / (trade.weight / 100)) || 1;
+        }
+
+        const quantity = trade.quantity || Math.floor(trade.amount / price) || 1;
+        preparedTrades.push({ ...trade, symbol, price, quantity });
+      }
+
+      // Step 2: Execute Database Transaction
+      await prisma.$transaction(async (tx) => {
+        // Deduct balance
+        await tx.user.update({
+          where: { id: req.userId },
+          data: { mockBalance: { decrement: capital } }
+        });
+
+        for (const trade of preparedTrades) {
+          let stock = await tx.stock.findUnique({ where: { symbol: trade.symbol } });
+          if (!stock) stock = await tx.stock.create({ data: { symbol: trade.symbol } });
+
+          // Upsert Portfolio
+          await tx.portfolioItem.upsert({
+            where: { userId_stockId: { userId: req.userId, stockId: stock.id } },
+            update: {
+              quantity: { increment: trade.quantity },
+              totalCost: { increment: trade.amount },
+              avgPrice: { set: 0 } // Re-calc flag
+            },
+            create: {
+              userId: req.userId,
+              stockId: stock.id,
+              quantity: trade.quantity,
+              avgPrice: trade.price,
+              totalCost: trade.amount
+            }
+          });
+
+          // Log Trade
+          await tx.tradeLog.create({
+            data: {
+              userId: req.userId,
+              symbol: trade.symbol,
+              action: 'BUY',
+              quantity: trade.quantity,
+              price: trade.price,
+              totalAmount: trade.amount,
+              type: 'MOCK',
+              mode: 'MANUAL',
+              reason: `Strategy Deployment: ${trade.reason || 'Asset Allocation'}`
+            }
+          });
+
+          executionResults.push({ symbol: trade.symbol, quantity: trade.quantity, status: 'SUCCESS' });
         }
       });
+
       return res.json({ 
-        message: 'Market is currently closed (IST: 9:15 AM - 3:30 PM, Mon-Fri). Strategy has been queued and will execute automatically when the market opens.',
-        isQueued: true
+        message: `Strategy deployed successfully in Mock Mode. ₹${capital.toLocaleString()} allocated.`,
+        results: executionResults
       });
+
+    } else {
+      // LIVE MODE
+      if (!user.brokerAccess || !user.brokerApiKey) {
+        return res.status(401).json({ error: 'Live broker not connected. Please visit Settings.' });
+      }
+
+      // Optional: Check Live Margins (Zerodha example)
+      if (user.brokerType === 'zerodha') {
+        try {
+          const marginsRaw = await axios.get('https://api.kite.trade/user/margins', {
+            headers: { 'X-Kite-Version': '3', 'Authorization': `token ${user.brokerAccess}` }
+          });
+          const availableCash = marginsRaw.data?.data?.equity?.available?.cash || 0;
+          if (availableCash < totalCapital) {
+            return res.status(400).json({ error: `Insufficient live funds. Required: ₹${totalCapital.toLocaleString()}, Available: ₹${availableCash.toLocaleString()}` });
+          }
+        } catch (e) {
+          console.error('Margin check failed:', e.message);
+        }
+      }
+
+      if (isMarketOpen()) {
+        const results = await processTradesImmediately(user.brokerAccess, user.brokerApiSecret, user.brokerType, trades.map(t => ({ ...t, symbol: t.name })));
+        return res.json({ 
+          message: `Strategy execution initiated via ${user.brokerType?.toUpperCase()}.`, 
+          results 
+        });
+      } else {
+        // Queue for later
+        await prisma.queuedTrade.create({
+          data: {
+            user: { connect: { id: req.userId } },
+            trades: trades.map(t => ({ ...t, symbol: t.name })),
+            brokerApiKey: user.brokerApiKey,
+            brokerApiSecret: user.brokerApiSecret,
+            brokerType: user.brokerType || 'zerodha',
+            status: 'PENDING'
+          }
+        });
+        return res.json({ 
+          message: 'Market is closed. Strategy has been queued for execution at next market open.',
+          isQueued: true
+        });
+      }
     }
   } catch (error) {
     console.error('Execution Error:', error);
-    res.status(500).json({ error: 'Failed to process strategy execution.' });
+    res.status(500).json({ error: error.message || 'Failed to process strategy execution.' });
   }
 };
 

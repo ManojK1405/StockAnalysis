@@ -1,7 +1,7 @@
 import express from 'express';
 import { 
   getWatchlist, addToWatchlist, removeFromWatchlist,
-  getPortfolio, addPortfolioItem, syncBroker, executeStrategy,
+  getPortfolio, addPortfolioItem, syncBroker, disconnectBroker, executeStrategy,
   getTradeQueue, retryTrade, dismissTrade, skipTrade,
   addMockBalance, toggleAutoPilot, setTradingMode, buyMockStock, sellMockStock, getTradeLogs, getBrokerOrders
 } from '../controllers/portfolio.controller.js';
@@ -20,6 +20,7 @@ router.get('/logs', getTradeLogs);
 router.get('/orders', getBrokerOrders);
 router.post('/portfolio', addPortfolioItem);
 router.post('/sync-broker', syncBroker);
+router.post('/disconnect-broker', disconnectBroker);
 router.post('/execute-strategy', executeStrategy);
 router.get('/queue', getTradeQueue);
 router.post('/queue/retry/:id', retryTrade);

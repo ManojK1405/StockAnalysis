@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { 
     User, Shield, Briefcase, Zap, AlertCircle, 
     CheckCircle2, X, ChevronRight, ArrowRight,
-    ShieldAlert
+    ShieldAlert, Trash2
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { toast } from 'react-hot-toast';
@@ -13,6 +13,7 @@ const Settings = () => {
     const { user } = useAuth();
     const [activeTab, setActiveTab] = useState('brokers'); // profile | security | brokers
     const [showBrokerModal, setShowBrokerModal] = useState(false);
+    const [showDisconnectConfirm, setShowDisconnectConfirm] = useState(false);
     const [selectedBroker, setSelectedBroker] = useState(null);
     const [credentials, setCredentials] = useState({ apiKey: '', apiSecret: '', requestToken: '' });
 
@@ -27,29 +28,29 @@ const Settings = () => {
                 apiKey: user?.brokerApiKey || '' 
             }));
             setSelectedBroker({ id: 'zerodha', name: 'Zerodha Kite' });
-            setShowBrokerModal(true);
-            
             // Auto-trigger handshake if we have the token and the broker is Zerodha
-            // This is the "get the token yourself" part
             const triggerHandshake = async () => {
                 try {
+                    toast.loading('Finalizing Institutional Handshake...', { id: 'handshake' });
                     const res = await api.post('/portfolio/sync-broker', {
                         brokerType: 'zerodha',
-                        apiKey: user?.brokerApiKey,
+                        apiKey: 'PERSISTED_IN_DB', // Use what we saved before redirecting
                         requestToken: token
                     });
                     if (res.data.synced >= 0) {
-                        toast.success('Handshake Completed Successfully');
-                        window.location.href = '/settings'; // Clean URL
+                        toast.success('Handshake Completed Successfully', { id: 'handshake' });
+                        setTimeout(() => {
+                            window.location.href = '/settings'; // Clean URL and refresh state
+                        }, 1000);
                     }
                 } catch (e) {
                     console.error('Auto-handshake failed', e);
+                    toast.error('Auto-handshake failed. Please enter credentials manually.', { id: 'handshake' });
+                    setShowBrokerModal(true); // Only show modal as a fallback
                 }
             };
 
-            if (user?.brokerApiKey) {
-                triggerHandshake();
-            }
+            triggerHandshake();
 
             // Clear URL params without refresh
             window.history.replaceState({}, document.title, window.location.pathname);
@@ -88,6 +89,20 @@ const Settings = () => {
             description: 'Built for super traders and long-term investors.'
         }
     ];
+
+    const handleDisconnect = async () => {
+        try {
+            toast.loading('Purging credentials...', { id: 'disconnect' });
+            await api.post('/portfolio/disconnect-broker');
+            toast.success('Broker Disconnected Successfully', { id: 'disconnect' });
+            setShowDisconnectConfirm(false);
+            setTimeout(() => {
+                window.location.reload();
+            }, 800);
+        } catch (error) {
+            toast.error('Failed to disconnect broker', { id: 'disconnect' });
+        }
+    };
 
     const handleConnect = async (e) => {
         if (e) e.preventDefault();
@@ -187,21 +202,36 @@ const Settings = () => {
                                                     <p className="text-xs text-slate-400 font-medium leading-relaxed mb-8">{broker.description}</p>
                                                     
                                                     {broker.enabled ? (
-                                                        <button 
-                                                            onClick={() => {
-                                                                setSelectedBroker(broker);
-                                                                setCredentials(prev => ({ 
-                                                                    ...prev, 
-                                                                    apiKey: user?.brokerApiKey || '',
-                                                                    apiSecret: '' 
-                                                                }));
-                                                                setShowBrokerModal(true);
-                                                            }}
-                                                            className="w-full py-4 bg-slate-900 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-orange-600 transition-all flex items-center justify-center gap-2 group-hover:shadow-lg group-hover:shadow-orange-600/20"
-                                                        >
-                                                            {broker.status === 'Connected' ? 'Session Active' : (broker.status === 'Expired' ? 'Re-establish Handshake' : 'Establish Link')}
-                                                            <ArrowRight className="w-3.5 h-3.5" />
-                                                        </button>
+                                                        <div className="flex gap-3">
+                                                            <button 
+                                                                onClick={() => {
+                                                                    setSelectedBroker(broker);
+                                                                    setCredentials(prev => ({ 
+                                                                        ...prev, 
+                                                                        apiKey: user?.brokerApiKey || '',
+                                                                        apiSecret: '' 
+                                                                    }));
+                                                                    setShowBrokerModal(true);
+                                                                }}
+                                                                className="flex-[3] py-4 bg-slate-900 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-orange-600 transition-all flex items-center justify-center gap-2 group-hover:shadow-lg group-hover:shadow-orange-600/20"
+                                                            >
+                                                                {broker.status === 'Connected' ? 'Session Active' : (broker.status === 'Expired' ? 'Re-establish Handshake' : 'Establish Link')}
+                                                                <ArrowRight className="w-3.5 h-3.5" />
+                                                            </button>
+                                                            {broker.status !== 'Not Connected' && (
+                                                                <button 
+                                                                    onClick={(e) => {
+                                                                        e.stopPropagation();
+                                                                        setSelectedBroker(broker);
+                                                                        setShowDisconnectConfirm(true);
+                                                                    }}
+                                                                    className="flex-1 py-4 bg-rose-50 text-rose-600 rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-rose-600 hover:text-white transition-all flex items-center justify-center"
+                                                                    title="Purge Credentials"
+                                                                >
+                                                                    <Trash2 className="w-4 h-4" />
+                                                                </button>
+                                                            )}
+                                                        </div>
                                                     ) : (
                                                         <div className="w-full py-4 bg-slate-100 text-slate-400 rounded-2xl font-black text-[10px] uppercase tracking-widest text-center italic">
                                                             Coming Soon
@@ -310,10 +340,28 @@ const Settings = () => {
                                                 </p>
                                                 <button 
                                                     type="button"
-                                                    onClick={() => {
-                                                        if (!credentials.apiKey) return toast.error('Enter API Key first');
-                                                        const loginUrl = `https://kite.zerodha.com/connect/login?v=3&api_key=${credentials.apiKey}`;
-                                                        window.location.href = loginUrl;
+                                                    onClick={async () => {
+                                                        if (!credentials.apiKey || !credentials.apiSecret) {
+                                                            return toast.error('Enter API Key and Secret first');
+                                                        }
+                                                        try {
+                                                            // STEP 1: Save credentials to DB so we have them when we return
+                                                            toast.loading('Saving Credentials...', { id: 'auth' });
+                                                            await api.post('/portfolio/sync-broker', {
+                                                                brokerType: 'zerodha',
+                                                                apiKey: credentials.apiKey,
+                                                                apiSecret: credentials.apiSecret
+                                                            });
+                                                            
+                                                            // STEP 2: Redirect to Zerodha
+                                                            toast.success('Credentials Saved. Redirecting...', { id: 'auth' });
+                                                            const loginUrl = `https://kite.zerodha.com/connect/login?v=3&api_key=${credentials.apiKey}`;
+                                                            setTimeout(() => {
+                                                                window.location.href = loginUrl;
+                                                            }, 800);
+                                                        } catch (err) {
+                                                            toast.error('Failed to save credentials. Check your API details.', { id: 'auth' });
+                                                        }
                                                     }}
                                                     className="w-full py-4 bg-white border-2 border-orange-200 text-orange-600 rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-orange-600 hover:text-white hover:border-orange-600 transition-all shadow-sm"
                                                 >
@@ -345,6 +393,50 @@ const Settings = () => {
                                         By connecting, you authorize EquiSense to execute trades on your behalf. <br/> This can be revoked at any time from your broker terminal.
                                     </p>
                                 </form>
+                            </div>
+                        </motion.div>
+                    </div>
+                )}
+            </AnimatePresence>
+            {/* Disconnect Confirmation Modal */}
+            <AnimatePresence>
+                {showDisconnectConfirm && (
+                    <div className="fixed inset-0 z-[110] flex items-center justify-center p-6">
+                        <motion.div 
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            exit={{ opacity: 0 }}
+                            onClick={() => setShowDisconnectConfirm(false)}
+                            className="absolute inset-0 bg-slate-900/60 backdrop-blur-md"
+                        />
+                        <motion.div 
+                            initial={{ scale: 0.9, opacity: 0, y: 20 }}
+                            animate={{ scale: 1, opacity: 1, y: 0 }}
+                            exit={{ scale: 0.9, opacity: 0, y: 20 }}
+                            className="relative bg-white w-full max-w-md rounded-[48px] shadow-2xl overflow-hidden border border-slate-100"
+                        >
+                            <div className="p-12 text-center">
+                                <div className="w-20 h-20 bg-rose-50 rounded-[28px] flex items-center justify-center mx-auto mb-8 text-rose-600 shadow-inner">
+                                    <Trash2 className="w-8 h-8" />
+                                </div>
+                                <h3 className="text-2xl font-black text-slate-900 tracking-tighter italic uppercase mb-4">Purge Connection?</h3>
+                                <p className="text-slate-500 font-medium leading-relaxed mb-10 text-sm">
+                                    You are about to permanently delete all API keys and session data for <span className="text-slate-900 font-bold uppercase tracking-widest text-[10px]">{selectedBroker?.name}</span>. This action cannot be undone.
+                                </p>
+                                <div className="flex flex-col gap-4">
+                                    <button 
+                                        onClick={handleDisconnect}
+                                        className="w-full py-6 bg-rose-600 text-white rounded-[24px] font-black text-xs uppercase tracking-[0.2em] shadow-xl shadow-rose-900/20 hover:bg-rose-700 transition-all active:scale-95"
+                                    >
+                                        Delete Credentials
+                                    </button>
+                                    <button 
+                                        onClick={() => setShowDisconnectConfirm(false)}
+                                        className="w-full py-6 bg-slate-50 text-slate-400 rounded-[24px] font-black text-xs uppercase tracking-[0.2em] hover:bg-slate-100 transition-all"
+                                    >
+                                        Cancel
+                                    </button>
+                                </div>
                             </div>
                         </motion.div>
                     </div>

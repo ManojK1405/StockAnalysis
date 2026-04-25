@@ -12,6 +12,7 @@ import { useAuth } from '../context/AuthContext';
 import FeatureLock from '../components/feature-lock';
 import { toast } from 'react-hot-toast';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
+import { PortfolioSkeleton } from '../components/skeleton';
 
 const COLORS = ['#0f172a', '#ea580c', '#64748b', '#94a3b8', '#cbd5e1'];
 
@@ -33,6 +34,8 @@ const Portfolio = () => {
     const [topUpAmount, setTopUpAmount] = useState('');
     const [socket, setSocket] = useState(null);
     const [queueTab, setQueueTab] = useState('upcoming'); // upcoming | history
+    const [showExecuteConfirm, setShowExecuteConfirm] = useState(false);
+    const [pendingExecution, setPendingExecution] = useState(null);
 
     const [brokerOrders, setBrokerOrders] = useState([]);
     const [activeTab, setActiveTab] = useState('portfolio'); // portfolio | analysis | orders
@@ -73,7 +76,6 @@ const Portfolio = () => {
         return () => clearInterval(interval);
     }, [mode]);
 
-    // 1. Stable Socket Connection (Connect Once)
     useEffect(() => {
         if (user?.brokerType) {
             setSelectedBroker(user.brokerType);
@@ -88,15 +90,11 @@ const Portfolio = () => {
         });
         
         setSocket(newSocket);
-        console.log('🔌 Socket.io: Attempting persistent connection...');
-
         return () => {
-            console.log('🔌 Socket.io: Disconnecting...');
             newSocket.disconnect();
         };
     }, []);
 
-    // 2. Dynamic Subscription Management
     useEffect(() => {
         if (!socket) return;
 
@@ -111,7 +109,6 @@ const Portfolio = () => {
                 ])
             ];
             if (symbols.length > 0) {
-                console.log('📡 Socket.io: Subscribing to', symbols.length, 'assets');
                 socket.emit('subscribe_live_data', { userId, symbols });
             }
         };
@@ -134,29 +131,21 @@ const Portfolio = () => {
                         pnl: pnl,
                         pnlPercent: (pnl / item.totalCost) * 100
                     };
-                    return { ...item, currentPrice: tick.last_price };
                 }
                 return item;
             }));
         });
 
-        if (user?.id && user?.brokerAccess) {
-            socket.emit('subscribe_live_data', { 
-                userId: user.id, 
-                symbols: portfolio.map(p => p.stock.symbol.split('.')[0]) 
-            });
-        }
-
         return () => {
             socket.off('live_ticks');
         };
-    }, [socket, user?.id, user?.brokerAccess, portfolio.length]);
+    }, [socket, watchlist.length, portfolio.length]);
 
     const sectorData = useMemo(() => {
         const sectors = {};
         portfolio.forEach(item => {
             const s = item.stock.sector || 'Others';
-            sectors[s] = (sectors[s] || 0) + (item.quantity * item.currentPrice);
+            sectors[s] = (sectors[s] || 0) + (item.quantity * (item.currentPrice || item.avgPrice || 0));
         });
         return Object.entries(sectors).map(([name, value]) => ({ name, value }));
     }, [portfolio]);
@@ -175,25 +164,11 @@ const Portfolio = () => {
 
     const { pnl: totalPnL, pnlPercent: totalPnLPercent, totalCurrent, totalInvested } = calculateTotalPnL();
 
-    // Data for Charts
-    const chartData = useMemo(() => {
-        // Generate mock historical data points based on trade logs
-        const baseValue = mockBalance + totalCurrent;
-        return [
-            { time: '09:15', value: baseValue * 0.98 },
-            { time: '10:30', value: baseValue * 0.99 },
-            { time: '11:45', value: baseValue * 0.985 },
-            { time: '13:00', value: baseValue * 1.005 },
-            { time: '14:15', value: baseValue * 1.01 },
-            { time: '15:30', value: baseValue }
-        ];
-    }, [mockBalance, totalCurrent]);
-
     const pieData = useMemo(() => {
         if (portfolio.length === 0) return [{ name: 'Cash', value: mockBalance }];
         const assets = portfolio.map(item => ({
             name: item.stock.symbol,
-            value: item.currentPrice * item.quantity
+            value: (item.currentPrice || item.avgPrice || 0) * item.quantity
         }));
         return [...assets, { name: 'Cash', value: mockBalance }];
     }, [portfolio, mockBalance]);
@@ -273,7 +248,57 @@ const Portfolio = () => {
         }
     };
 
-    const upcomingTrades = tradeQueue.filter(t => t.status === 'PENDING');
+    const handleExecuteQueue = async (trade) => {
+        if (mode === 'live') {
+            setPendingExecution(trade);
+            setShowExecuteConfirm(true);
+        } else {
+            // In mock mode, we just trigger it (backend logic for immediate mock exec could be added)
+            // For now, let's treat it as a re-queue/retry
+            try {
+                await api.post(`/portfolio/queue/retry/${trade.id}`);
+                toast.success('Trade re-queued for execution');
+                fetchData();
+            } catch (e) {
+                toast.error('Failed to execute trade');
+            }
+        }
+    };
+
+    const confirmAndExecute = async () => {
+        if (!pendingExecution) return;
+        setShowExecuteConfirm(false);
+        const trade = pendingExecution;
+        
+        try {
+            // We use the execute-strategy endpoint or retry endpoint
+            // Since execute-strategy handles the isMarketOpen check and immediate execution,
+            // let's use a specialized manual execute endpoint if available, or just retry.
+            // For Live mode, retry will set it to PENDING and the background processor will pick it up,
+            // OR we can call the execute-strategy with the same trades.
+            
+            const res = await api.post('/portfolio/execute-strategy', {
+                mode: 'live',
+                trades: trade.trades.map(t => ({ name: t.symbol, amount: t.amount || (t.quantity * t.price), quantity: t.quantity })),
+                totalCapital: trade.trades.reduce((sum, t) => sum + (t.amount || (t.quantity * t.price)), 0)
+            });
+
+            if (res.data.isQueued) {
+                toast.success('Market is closed. Trade remains in queue.', { icon: '⏳' });
+            } else {
+                // If it executed, we should remove it from the queued trades
+                await api.delete(`/portfolio/queue/${trade.id}`);
+                toast.success('Order transmitted to broker!', { icon: '🚀' });
+            }
+            fetchData();
+        } catch (e) {
+            toast.error(e.response?.data?.error || 'Live execution failed.');
+        } finally {
+            setPendingExecution(null);
+        }
+    };
+
+    const upcomingTrades = tradeQueue.filter(t => t.status === 'PENDING' || t.status === 'FAILED');
 
     return (
         <div className="bg-[#fcfdfe] min-h-screen p-6 md:p-12 pb-32">
@@ -291,8 +316,7 @@ const Portfolio = () => {
                         <p className="text-slate-500 font-bold uppercase tracking-widest text-[10px] pl-1">Institutional Wealth Terminal</p>
                     </div>
 
-                    <div className="flex items-center gap-4">
-                        {/* 1. Mode Toggle */}
+                    <div className="flex flex-wrap items-center justify-end gap-4">
                         <div className="flex bg-slate-100 p-1.5 rounded-2xl border border-slate-200 shrink-0">
                             <button 
                                 onClick={() => {
@@ -307,14 +331,12 @@ const Portfolio = () => {
                                 onClick={() => {
                                     if (mode === 'mock') setShowModeConfirm(true);
                                 }}
-                                title={!user?.brokerApiKey ? 'Connect a broker in Settings to enable Live Sync' : ''}
                                 className={`px-6 py-3 rounded-xl font-black text-[10px] uppercase tracking-widest transition-all ${mode === 'live' ? 'bg-emerald-600 text-white shadow-md' : 'text-slate-400 hover:text-slate-900'} ${!user?.brokerApiKey ? 'opacity-40 cursor-not-allowed grayscale' : ''}`}
                             >
                                 Live Sync
                             </button>
                         </div>
 
-                        {/* 2. Broker Selector (Conditional) */}
                         {mode === 'live' && (
                             <div className="flex items-center gap-3 bg-white px-5 py-2 rounded-2xl border border-slate-200 shadow-sm shrink-0">
                                 <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Broker:</span>
@@ -330,7 +352,6 @@ const Portfolio = () => {
                             </div>
                         )}
 
-                        {/* 3. Market Status Indicator */}
                         <div className={`flex items-center gap-4 px-6 py-4 rounded-[24px] border transition-all shadow-sm shrink-0 ${marketOpen ? 'bg-emerald-50 border-emerald-100' : 'bg-amber-50 border-amber-100'}`}>
                             <div className={`w-3 h-3 rounded-full ${marketOpen ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`} />
                             <div className="flex flex-col">
@@ -341,7 +362,6 @@ const Portfolio = () => {
                             </div>
                         </div>
 
-                        {/* 4. Available Funds Card */}
                         <div className="bg-white border border-slate-200 px-8 py-4 rounded-[24px] shadow-sm flex flex-col justify-center min-w-[200px] shrink-0">
                             <p className="text-[10px] uppercase font-black text-slate-400 tracking-widest mb-1 flex items-center gap-2">
                                 <Wallet className="w-3 h-3 text-orange-600" />
@@ -357,7 +377,6 @@ const Portfolio = () => {
                             </div>
                         </div>
 
-                        {/* 5. AI Pilot Button */}
                         <button 
                             onClick={toggleAI}
                             className={`px-10 py-5 rounded-[24px] font-black text-[10px] uppercase tracking-[0.2em] transition-all flex items-center gap-4 shadow-xl active:scale-95 shrink-0 ${autoPilot ? 'bg-orange-600 text-white shadow-orange-500/30' : 'bg-slate-900 text-white shadow-slate-900/30'}`}
@@ -374,252 +393,253 @@ const Portfolio = () => {
                     <div className="grid grid-cols-1 lg:grid-cols-12 gap-10">
                         {/* Main Content Area */}
                         <div className="lg:col-span-8 space-y-10">
-                            
-                            {/* Performance Overview */}
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                                <div className="bg-white p-8 rounded-[40px] border border-slate-100 shadow-sm">
-                                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-2">
-                                        <TrendingUp className="w-3 h-3 text-emerald-500" />
-                                        Total AUM
-                                    </p>
-                                    <p className="text-3xl font-black text-slate-900">₹{(mockBalance + totalCurrent).toLocaleString()}</p>
-                                    <p className="text-[10px] font-bold text-slate-400 mt-2">Vault + Market Value</p>
-                                </div>
-                                <div className="bg-white p-8 rounded-[40px] border border-slate-100 shadow-sm">
-                                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-2">
-                                        <ArrowUpRight className="w-3 h-3 text-emerald-500" />
-                                        Net Unrealized P&L
-                                    </p>
-                                    <p className={`text-3xl font-black ${totalPnL >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
-                                        {totalPnL >= 0 ? '+' : '-'}₹{Math.abs(totalPnL).toLocaleString()}
-                                    </p>
-                                    <p className={`text-[10px] font-bold mt-2 ${totalPnL >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>{totalPnLPercent.toFixed(2)}% ROI</p>
-                                </div>
-                                <div className="bg-white p-8 rounded-[40px] border border-slate-100 shadow-sm">
-                                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-2">
-                                        <Target className="w-3 h-3 text-orange-500" />
-                                        Capital Deployed
-                                    </p>
-                                    <p className="text-3xl font-black text-slate-900">₹{totalInvested.toLocaleString()}</p>
-                                    <p className="text-[10px] font-bold text-slate-400 mt-2">{((totalInvested/(mockBalance + totalInvested))*100).toFixed(1)}% Allocation</p>
-                                </div>
-                            </div>
-
-
-                            {/* Holdings Table */}
-                            <div className="bg-white rounded-[40px] border border-slate-100 shadow-[0_4px_20px_rgb(0,0,0,0.02)] overflow-hidden">
-                                <div className="p-8 md:p-10 border-b border-slate-50 flex flex-col md:flex-row justify-between items-center gap-6">
-                                    <div className="flex items-center gap-8">
-                                        <div className="flex items-center gap-5">
-                                            <div className="p-4 bg-orange-50 rounded-2xl text-orange-600">
-                                                <LayoutDashboard className="w-6 h-6" />
-                                            </div>
-                                            <div>
-                                                <h2 className="text-2xl font-black text-slate-900 italic tracking-tight uppercase">EquiSense Vault</h2>
-                                                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Managed Assets</p>
-                                            </div>
+                            {loading ? (
+                                <PortfolioSkeleton />
+                            ) : (
+                                <>
+                                    {/* Performance Overview */}
+                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                                        <div className="bg-white p-8 rounded-[40px] border border-slate-100 shadow-sm">
+                                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-2">
+                                                <TrendingUp className="w-3 h-3 text-emerald-500" />
+                                                Total AUM
+                                            </p>
+                                            <p className="text-3xl font-black text-slate-900">₹{(mockBalance + totalCurrent).toLocaleString()}</p>
+                                            <p className="text-[10px] font-bold text-slate-400 mt-2">Vault + Market Value</p>
                                         </div>
-                                        
-                                        <div className="h-10 w-[1px] bg-slate-100 hidden md:block" />
-                                        
-                                        <div className="flex items-center bg-slate-50 p-1 rounded-2xl">
-                                            <button 
-                                                onClick={() => setActiveTab('portfolio')}
-                                                className={`px-6 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'portfolio' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
-                                            >
-                                                Portfolio
-                                            </button>
-                                            <button 
-                                                onClick={() => setActiveTab('analysis')}
-                                                className={`px-6 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'analysis' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
-                                            >
-                                                Analysis
-                                            </button>
-                                            <button 
-                                                onClick={() => setActiveTab('orders')}
-                                                className={`px-6 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'orders' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
-                                            >
-                                                Audit Trail
-                                            </button>
+                                        <div className="bg-white p-8 rounded-[40px] border border-slate-100 shadow-sm">
+                                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-2">
+                                                <ArrowUpRight className="w-3 h-3 text-emerald-500" />
+                                                Net Unrealized P&L
+                                            </p>
+                                            <p className={`text-3xl font-black ${totalPnL >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+                                                {totalPnL >= 0 ? '+' : '-'}₹{Math.abs(totalPnL).toLocaleString()}
+                                            </p>
+                                            <p className={`text-[10px] font-bold mt-2 ${totalPnL >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>{totalPnLPercent.toFixed(2)}% ROI</p>
+                                        </div>
+                                        <div className="bg-white p-8 rounded-[40px] border border-slate-100 shadow-sm">
+                                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-2">
+                                                <Target className="w-3 h-3 text-orange-500" />
+                                                Capital Deployed
+                                            </p>
+                                            <p className="text-3xl font-black text-slate-900">₹{totalInvested.toLocaleString()}</p>
+                                            <p className="text-[10px] font-bold text-slate-400 mt-2">{((totalInvested/(mockBalance + totalInvested))*100).toFixed(1)}% Allocation</p>
                                         </div>
                                     </div>
-                                    <div className="flex items-center gap-4">
-                                        {activeTab === 'portfolio' && (
-                                            <button 
-                                                onClick={() => setShowAddModal(true)}
-                                                className="flex items-center gap-3 px-8 py-3 bg-slate-900 text-white rounded-full text-[10px] font-black uppercase tracking-widest hover:bg-orange-600 hover:shadow-xl hover:shadow-orange-600/20 transition-all active:scale-95 shadow-lg"
-                                            >
-                                                <Plus className="w-4 h-4" />
-                                                Open Position
-                                            </button>
-                                        )}
-                                    </div>
-                                </div>
-                                <div className="overflow-x-auto min-h-[400px]">
-                                    {activeTab === 'portfolio' && (
-                                        <table className="w-full text-left border-collapse">
-                                            <thead>
-                                                <tr className="bg-slate-50/40">
-                                                    <th className="p-8 text-[10px] font-black text-slate-400 uppercase tracking-widest">Asset Identification</th>
-                                                    <th className="p-8 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right">Volume</th>
-                                                    <th className="p-8 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right">Entry / Live Spot</th>
-                                                    <th className="p-8 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right">Profit Analysis</th>
-                                                    <th className="p-8"></th>
-                                                </tr>
-                                            </thead>
-                                            <tbody className="divide-y divide-slate-50">
-                                            {portfolio.map((item) => (
-                                                <tr key={item.id} className="group hover:bg-slate-50/50 transition-all duration-300">
-                                                    <td className="p-8">
-                                                        <div className="flex items-center gap-6">
-                                                            <div className="w-16 h-16 rounded-[24px] bg-slate-900 flex items-center justify-center font-black text-white text-2xl shadow-xl shadow-slate-900/10 group-hover:scale-105 transition-transform">
-                                                                {item.stock.symbol[0]}
-                                                            </div>
-                                                            <div>
-                                                                <p className="font-black text-slate-900 text-xl tracking-tighter">{item.stock.symbol}</p>
-                                                                <div className="flex items-center gap-2 mt-1">
-                                                                    <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">{item.stock.sector || 'EQUITY'}</span>
-                                                                    <span className="w-1 h-1 rounded-full bg-slate-300" />
-                                                                    <span className="text-[10px] text-orange-500 font-bold uppercase tracking-widest">NSE</span>
-                                                                </div>
-                                                            </div>
-                                                        </div>
-                                                    </td>
-                                                    <td className="p-8 text-right font-black text-slate-700 text-xl">
-                                                        {item.quantity.toLocaleString()}
-                                                        <span className="block text-[9px] text-slate-300 font-black tracking-widest mt-1">UNITS</span>
-                                                    </td>
-                                                    <td className="p-8 text-right">
-                                                        <p className="font-black text-slate-900 text-xl">₹{item.avgPrice.toLocaleString()}</p>
-                                                        <div className="flex items-center justify-end gap-2 mt-1">
-                                                            <div className="w-1.5 h-1.5 rounded-full bg-orange-600 animate-pulse" />
-                                                            <p className="text-[10px] text-slate-400 font-black tracking-widest uppercase italic">Live: ₹{item.currentPrice?.toLocaleString() || '--'}</p>
-                                                        </div>
-                                                    </td>
-                                                    <td className="p-8 text-right">
-                                                        <div className={`inline-flex items-center gap-2 font-black text-2xl tracking-tighter ${item.pnl >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
-                                                            {item.pnl >= 0 ? <ArrowUpRight className="w-6 h-6" /> : <ArrowDownRight className="w-6 h-6" />}
-                                                            ₹{Math.abs(item.pnl || 0).toLocaleString()}
-                                                        </div>
-                                                        <p className={`text-[10px] font-black mt-1 tracking-widest uppercase px-3 py-1 rounded-lg inline-block ml-auto ${item.pnl >= 0 ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'}`}>
-                                                            {item.pnlPercent?.toFixed(2)}%
-                                                        </p>
-                                                    </td>
-                                                    <td className="p-8 text-right">
-                                                        <button 
-                                                            onClick={() => {
-                                                                setNewItem({ symbol: item.stock.symbol, quantity: item.quantity, type: 'SELL' });
-                                                                setShowAddModal(true);
-                                                            }}
-                                                            className="p-4 bg-slate-50 hover:bg-rose-600 hover:text-white text-slate-300 rounded-2xl transition-all opacity-0 group-hover:opacity-100 shadow-sm"
-                                                        >
-                                                            <X className="w-5 h-5" />
-                                                        </button>
-                                                    </td>
-                                                </tr>
-                                            ))}
-                                            {portfolio.length === 0 && (
-                                                <tr>
-                                                    <td colSpan="5" className="p-32 text-center">
-                                                        <div className="w-24 h-24 bg-slate-50 rounded-[32px] flex items-center justify-center mx-auto mb-8 shadow-inner">
-                                                            <Briefcase className="w-10 h-10 text-slate-200" />
-                                                        </div>
-                                                        <p className="text-slate-400 font-black text-xs uppercase tracking-[0.3em]">Vault Liquidity High • No Positions</p>
-                                                    </td>
-                                                </tr>
-                                            )}
-                                        </tbody>
-                                    </table>
-                                )}
 
-                                    {activeTab === 'analysis' && (
-                                        <div className="p-10">
-                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
-                                                <div className="bg-slate-50/50 p-10 rounded-[40px] border border-slate-100">
-                                                    <h3 className="text-sm font-black text-slate-900 uppercase tracking-widest mb-8 flex items-center gap-3">
-                                                        <PieIcon className="w-4 h-4 text-orange-500" />
-                                                        Sector Diversification
-                                                    </h3>
-                                                    <div className="h-[300px]">
-                                                        <ResponsiveContainer width="100%" height="100%">
-                                                            <PieChart>
-                                                                <Pie
-                                                                    data={sectorData}
-                                                                    innerRadius={80}
-                                                                    outerRadius={110}
-                                                                    paddingAngle={8}
-                                                                    dataKey="value"
-                                                                >
-                                                                    {sectorData.map((entry, index) => (
-                                                                        <Cell key={`cell-${index}`} fill={['#0f172a', '#ea580c', '#64748b', '#94a3b8'][index % 4]} stroke="none" />
-                                                                    ))}
-                                                                </Pie>
-                                                                <Tooltip 
-                                                                    contentStyle={{ backgroundColor: '#fff', borderRadius: '16px', border: 'none', boxShadow: '0 10px 30px rgba(0,0,0,0.1)' }}
-                                                                    itemStyle={{ fontSize: '10px', fontWeight: '900', textTransform: 'uppercase' }}
-                                                                />
-                                                            </PieChart>
-                                                        </ResponsiveContainer>
+                                    {/* Holdings Table */}
+                                    <div className="bg-white rounded-[40px] border border-slate-100 shadow-[0_4px_20px_rgb(0,0,0,0.02)] overflow-hidden">
+                                        <div className="p-8 md:p-10 border-b border-slate-50 flex flex-col md:flex-row justify-between items-center gap-6">
+                                            <div className="flex items-center gap-8">
+                                                <div className="flex items-center gap-5">
+                                                    <div className="p-4 bg-orange-50 rounded-2xl text-orange-600">
+                                                        <LayoutDashboard className="w-6 h-6" />
+                                                    </div>
+                                                    <div>
+                                                        <h2 className="text-2xl font-black text-slate-900 italic tracking-tight uppercase">EquiSense Vault</h2>
+                                                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Managed Assets</p>
                                                     </div>
                                                 </div>
-                                                <div className="flex flex-col justify-center gap-4">
-                                                    {sectorData.map((s, idx) => (
-                                                        <div key={s.name} className="flex items-center justify-between p-6 bg-white rounded-3xl border border-slate-100 shadow-sm">
-                                                            <div className="flex items-center gap-4">
-                                                                <div className="w-2 h-2 rounded-full" style={{ backgroundColor: ['#0f172a', '#ea580c', '#64748b', '#94a3b8'][idx % 4] }} />
-                                                                <span className="text-[10px] font-black text-slate-900 uppercase tracking-widest">{s.name}</span>
-                                                            </div>
-                                                            <span className="text-[10px] font-black text-slate-400">₹{s.value.toLocaleString()}</span>
-                                                        </div>
-                                                    ))}
+                                                <div className="h-10 w-[1px] bg-slate-100 hidden md:block" />
+                                                <div className="flex bg-slate-50 p-1 rounded-2xl">
+                                                    <button 
+                                                        onClick={() => setActiveTab('portfolio')}
+                                                        className={`px-6 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'portfolio' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
+                                                    >
+                                                        Portfolio
+                                                    </button>
+                                                    <button 
+                                                        onClick={() => setActiveTab('analysis')}
+                                                        className={`px-6 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'analysis' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
+                                                    >
+                                                        Analysis
+                                                    </button>
+                                                    <button 
+                                                        onClick={() => setActiveTab('orders')}
+                                                        className={`px-6 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'orders' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
+                                                    >
+                                                        Audit Trail
+                                                    </button>
                                                 </div>
                                             </div>
+                                            <div className="flex items-center gap-4">
+                                                {activeTab === 'portfolio' && (
+                                                    <button 
+                                                        onClick={() => setShowAddModal(true)}
+                                                        className="flex items-center gap-3 px-8 py-3 bg-slate-900 text-white rounded-full text-[10px] font-black uppercase tracking-widest hover:bg-orange-600 hover:shadow-xl hover:shadow-orange-600/20 transition-all active:scale-95 shadow-lg"
+                                                    >
+                                                        <Plus className="w-4 h-4" />
+                                                        Open Position
+                                                    </button>
+                                                )}
+                                            </div>
                                         </div>
-                                    )}
+                                        <div className="overflow-x-auto min-h-[400px]">
+                                            {activeTab === 'portfolio' && (
+                                                <table className="w-full text-left border-collapse">
+                                                    <thead>
+                                                        <tr className="bg-slate-50/40">
+                                                            <th className="p-8 text-[10px] font-black text-slate-400 uppercase tracking-widest">Asset Identification</th>
+                                                            <th className="p-8 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right">Volume</th>
+                                                            <th className="p-8 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right">Entry / Live Spot</th>
+                                                            <th className="p-8 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right">Profit Analysis</th>
+                                                            <th className="p-8"></th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody className="divide-y divide-slate-50">
+                                                        {portfolio.map((item) => (
+                                                            <tr key={item.id} className="group hover:bg-slate-50/50 transition-all duration-300">
+                                                                <td className="p-8">
+                                                                    <div className="flex items-center gap-6">
+                                                                        <div className="w-16 h-16 rounded-[24px] bg-slate-900 flex items-center justify-center font-black text-white text-2xl shadow-xl shadow-slate-900/10 group-hover:scale-105 transition-transform">
+                                                                            {item.stock.symbol[0]}
+                                                                        </div>
+                                                                        <div>
+                                                                            <p className="font-black text-slate-900 text-xl tracking-tighter">{item.stock.symbol}</p>
+                                                                            <div className="flex items-center gap-2 mt-1">
+                                                                                <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">{item.stock.sector || 'EQUITY'}</span>
+                                                                                <span className="w-1 h-1 rounded-full bg-slate-300" />
+                                                                                <span className="text-[10px] text-orange-500 font-bold uppercase tracking-widest">NSE</span>
+                                                                            </div>
+                                                                        </div>
+                                                                    </div>
+                                                                </td>
+                                                                <td className="p-8 text-right font-black text-slate-700 text-xl">
+                                                                    {item.quantity.toLocaleString()}
+                                                                    <span className="block text-[9px] text-slate-300 font-black tracking-widest mt-1">UNITS</span>
+                                                                </td>
+                                                                <td className="p-8 text-right">
+                                                                    <p className="font-black text-slate-900 text-xl">₹{(item.avgPrice || item.averagePrice || 0).toLocaleString()}</p>
+                                                                    <div className="flex items-center justify-end gap-2 mt-1">
+                                                                        <div className="w-1.5 h-1.5 rounded-full bg-orange-600 animate-pulse" />
+                                                                        <p className="text-[10px] text-slate-400 font-black tracking-widest uppercase italic">Live: ₹{item.currentPrice?.toLocaleString() || '--'}</p>
+                                                                    </div>
+                                                                </td>
+                                                                <td className="p-8 text-right">
+                                                                    <div className={`inline-flex items-center gap-2 font-black text-2xl tracking-tighter ${item.pnl >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+                                                                        {item.pnl >= 0 ? <ArrowUpRight className="w-6 h-6" /> : <ArrowDownRight className="w-6 h-6" />}
+                                                                        ₹{Math.abs(item.pnl || 0).toLocaleString()}
+                                                                    </div>
+                                                                    <p className={`text-[10px] font-black mt-1 tracking-widest uppercase px-3 py-1 rounded-lg inline-block ml-auto ${item.pnl >= 0 ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'}`}>
+                                                                        {item.pnlPercent?.toFixed(2)}%
+                                                                    </p>
+                                                                </td>
+                                                                <td className="p-8 text-right">
+                                                                    <button 
+                                                                        onClick={() => {
+                                                                            setNewItem({ symbol: item.stock.symbol, quantity: item.quantity, type: 'SELL' });
+                                                                            setShowAddModal(true);
+                                                                        }}
+                                                                        className="p-4 bg-slate-50 hover:bg-rose-600 hover:text-white text-slate-300 rounded-2xl transition-all opacity-0 group-hover:opacity-100 shadow-sm"
+                                                                    >
+                                                                        <X className="w-5 h-5" />
+                                                                    </button>
+                                                                </td>
+                                                            </tr>
+                                                        ))}
+                                                        {portfolio.length === 0 && (
+                                                            <tr>
+                                                                <td colSpan="5" className="p-32 text-center">
+                                                                    <div className="w-24 h-24 bg-slate-50 rounded-[32px] flex items-center justify-center mx-auto mb-8 shadow-inner">
+                                                                        <Briefcase className="w-10 h-10 text-slate-200" />
+                                                                    </div>
+                                                                    <p className="text-slate-400 font-black text-xs uppercase tracking-[0.3em]">Vault Liquidity High • No Positions</p>
+                                                                </td>
+                                                            </tr>
+                                                        )}
+                                                    </tbody>
+                                                </table>
+                                            )}
 
-                                    {activeTab === 'orders' && (
-                                        <div className="p-0">
-                                            <table className="w-full text-left border-collapse">
-                                                <thead>
-                                                    <tr className="bg-slate-50/40 border-b border-slate-50">
-                                                        <th className="p-8 text-[10px] font-black text-slate-400 uppercase tracking-widest">Order Details</th>
-                                                        <th className="p-8 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right">Volume</th>
-                                                        <th className="p-8 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right">Execution Price</th>
-                                                        <th className="p-8 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right">Status</th>
-                                                    </tr>
-                                                </thead>
-                                                <tbody className="divide-y divide-slate-50">
-                                                    {brokerOrders.map((order) => (
-                                                        <tr key={order.order_id} className="hover:bg-slate-50/50 transition-all">
-                                                            <td className="p-8">
-                                                                <p className="font-black text-slate-900 text-lg uppercase tracking-tight">{order.tradingsymbol}</p>
-                                                                <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mt-1">{order.order_timestamp}</p>
-                                                            </td>
-                                                            <td className="p-8 text-right font-black text-slate-700">{order.quantity}</td>
-                                                            <td className="p-8 text-right font-black text-slate-900">₹{order.average_price.toLocaleString()}</td>
-                                                            <td className="p-8 text-right">
-                                                                <span className={`px-4 py-2 rounded-full text-[8px] font-black uppercase tracking-widest ${order.status === 'COMPLETE' ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'}`}>
-                                                                    {order.status}
-                                                                </span>
-                                                            </td>
-                                                        </tr>
-                                                    ))}
-                                                    {brokerOrders.length === 0 && (
-                                                        <tr>
-                                                            <td colSpan="4" className="p-20 text-center text-slate-300 font-black text-[10px] uppercase tracking-widest">No order history available</td>
-                                                        </tr>
-                                                    )}
-                                                </tbody>
-                                            </table>
+                                            {activeTab === 'analysis' && (
+                                                <div className="p-10">
+                                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
+                                                        <div className="bg-slate-50/50 p-10 rounded-[40px] border border-slate-100">
+                                                            <h3 className="text-sm font-black text-slate-900 uppercase tracking-widest mb-8 flex items-center gap-3">
+                                                                <PieIcon className="w-4 h-4 text-orange-500" />
+                                                                Sector Diversification
+                                                            </h3>
+                                                            <div className="h-[300px]">
+                                                                <ResponsiveContainer width="100%" height="100%">
+                                                                    <PieChart>
+                                                                        <Pie
+                                                                            data={sectorData}
+                                                                            innerRadius={80}
+                                                                            outerRadius={110}
+                                                                            paddingAngle={8}
+                                                                            dataKey="value"
+                                                                        >
+                                                                            {sectorData.map((entry, index) => (
+                                                                                <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} stroke="none" />
+                                                                            ))}
+                                                                        </Pie>
+                                                                        <Tooltip 
+                                                                            contentStyle={{ backgroundColor: '#fff', borderRadius: '16px', border: 'none', boxShadow: '0 10px 30px rgba(0,0,0,0.1)' }}
+                                                                            itemStyle={{ fontSize: '10px', fontWeight: '900', textTransform: 'uppercase' }}
+                                                                        />
+                                                                    </PieChart>
+                                                                </ResponsiveContainer>
+                                                            </div>
+                                                        </div>
+                                                        <div className="flex flex-col justify-center gap-4">
+                                                            {sectorData.map((s, idx) => (
+                                                                <div key={s.name} className="flex items-center justify-between p-6 bg-white rounded-3xl border border-slate-100 shadow-sm">
+                                                                    <div className="flex items-center gap-4">
+                                                                        <div className="w-2 h-2 rounded-full" style={{ backgroundColor: COLORS[idx % COLORS.length] }} />
+                                                                        <span className="text-[10px] font-black text-slate-900 uppercase tracking-widest">{s.name}</span>
+                                                                    </div>
+                                                                    <span className="text-[10px] font-black text-slate-400">₹{s.value.toLocaleString()}</span>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            )}
+
+                                            {activeTab === 'orders' && (
+                                                <div className="p-0">
+                                                    <table className="w-full text-left border-collapse">
+                                                        <thead>
+                                                            <tr className="bg-slate-50/40 border-b border-slate-50">
+                                                                <th className="p-8 text-[10px] font-black text-slate-400 uppercase tracking-widest">Order Details</th>
+                                                                <th className="p-8 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right">Volume</th>
+                                                                <th className="p-8 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right">Execution Price</th>
+                                                                <th className="p-8 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right">Status</th>
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody className="divide-y divide-slate-50">
+                                                            {brokerOrders.map((order) => (
+                                                                <tr key={order.order_id} className="hover:bg-slate-50/50 transition-all">
+                                                                    <td className="p-8">
+                                                                        <p className="font-black text-slate-900 text-lg uppercase tracking-tight">{order.tradingsymbol}</p>
+                                                                        <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mt-1">{order.order_timestamp}</p>
+                                                                    </td>
+                                                                    <td className="p-8 text-right font-black text-slate-700">{order.quantity}</td>
+                                                                    <td className="p-8 text-right font-black text-slate-900">₹{order.average_price.toLocaleString()}</td>
+                                                                    <td className="p-8 text-right">
+                                                                        <span className={`px-4 py-2 rounded-full text-[8px] font-black uppercase tracking-widest ${order.status === 'COMPLETE' ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'}`}>
+                                                                            {order.status}
+                                                                        </span>
+                                                                    </td>
+                                                                </tr>
+                                                            ))}
+                                                            {brokerOrders.length === 0 && (
+                                                                <tr>
+                                                                    <td colSpan="4" className="p-20 text-center text-slate-300 font-black text-[10px] uppercase tracking-widest">No order history available</td>
+                                                                </tr>
+                                                            )}
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                            )}
                                         </div>
-                                    )}
-                                </div>
-                            </div>
+                                    </div>
+                                </>
+                            )}
                         </div>
 
                         {/* Sidebar */}
                         <div className="lg:col-span-4 space-y-10 lg:sticky lg:top-24 lg:self-start">
-                            
                             {/* Asset Distribution */}
                             <div className="bg-white p-10 rounded-[48px] border border-slate-100 shadow-sm">
                                 <div className="flex items-center gap-4 mb-8">
@@ -685,7 +705,6 @@ const Portfolio = () => {
                                         </button>
                                     </div>
                                 </div>
-                                
                                 <div className="p-8 space-y-6 flex-1 overflow-y-auto max-h-[700px] scrollbar-hide">
                                     {queueTab === 'upcoming' ? (
                                         upcomingTrades.map((trade) => (
@@ -918,250 +937,221 @@ const Portfolio = () => {
                 )}
 
                 {/* Add/Trade Modal */}
-                {showAddModal && (
-                    <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-slate-900/60 backdrop-blur-md">
-                        <motion.div 
-                            initial={{ opacity: 0, scale: 0.9, y: 20 }} 
-                            animate={{ opacity: 1, scale: 1, y: 0 }} 
-                            exit={{ opacity: 0, scale: 0.9, y: 20 }}
-                            className="bg-white p-10 w-full max-w-lg rounded-[48px] shadow-2xl relative border border-slate-200"
-                        >
-                            <div className="flex items-center gap-4 mb-8">
-                                <div className={`p-4 rounded-[20px] text-white ${newItem.type === 'BUY' ? 'bg-emerald-600' : 'bg-rose-600'}`}>
-                                    <Zap className="w-6 h-6" />
-                                </div>
-                                <div>
-                                    <h3 className="text-2xl font-black text-slate-900 italic tracking-tight uppercase italic">Secure Transmission</h3>
-                                    <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest">Executing {newItem.type} Order</p>
-                                </div>
-                            </div>
-
-                            <form onSubmit={handleMockOrder} className="space-y-6">
-                                <div className="flex bg-slate-100 p-1.5 rounded-[20px] mb-6">
-                                    <button 
-                                        type="button"
-                                        onClick={() => setNewItem({...newItem, type: 'BUY'})}
-                                        className={`flex-1 py-3 rounded-xl font-black text-[10px] uppercase tracking-widest transition-all ${newItem.type === 'BUY' ? 'bg-white text-emerald-600 shadow-sm' : 'text-slate-400'}`}
-                                    >
-                                        Buy Signal
-                                    </button>
-                                    <button 
-                                        type="button"
-                                        onClick={() => setNewItem({...newItem, type: 'SELL'})}
-                                        className={`flex-1 py-3 rounded-xl font-black text-[10px] uppercase tracking-widest transition-all ${newItem.type === 'SELL' ? 'bg-white text-rose-600 shadow-sm' : 'text-slate-400'}`}
-                                    >
-                                        Sell Signal
-                                    </button>
-                                </div>
-
-                                <div className="space-y-2">
-                                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Asset Identification</label>
-                                    <input 
-                                        type="text" 
-                                        placeholder="E.g. RELIANCE" 
-                                        className="w-full p-6 bg-slate-50 border border-slate-100 rounded-3xl text-lg font-black focus:outline-none focus:ring-4 focus:ring-orange-600/5 focus:border-orange-600/30 transition-all uppercase" 
-                                        value={newItem.symbol}
-                                        onChange={(e) => setNewItem({...newItem, symbol: e.target.value})}
-                                    />
-                                </div>
-                                <div className="space-y-2">
-                                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Share Quantity</label>
-                                    <input type="number" placeholder="00" className="w-full p-6 bg-slate-50 border border-slate-100 rounded-3xl text-lg font-black focus:outline-none border-slate-100 focus:border-orange-600/30 transition-all" value={newItem.quantity} onChange={(e) => setNewItem({...newItem, quantity: e.target.value})} />
-                                </div>
-                                
-                                <div className="flex gap-4 pt-6">
-                                    <button type="button" onClick={() => setShowAddModal(false)} className="flex-1 p-6 rounded-3xl border border-slate-100 font-black text-slate-400 uppercase tracking-widest hover:bg-slate-50 transition-colors">Abort</button>
-                                    <button type="submit" className={`flex-1 p-6 rounded-3xl text-white font-black text-xs uppercase tracking-[0.2em] transition-all shadow-xl ${newItem.type === 'BUY' ? 'bg-emerald-600 shadow-emerald-900/10' : 'bg-rose-600 shadow-rose-900/10'}`}>
-                                        Transmit {newItem.type}
-                                    </button>
-                                </div>
-                            </form>
-                        </motion.div>
-                    </div>
-                )}
-                                {showModeConfirm && (
-                    <div className="fixed inset-0 z-[100] flex items-center justify-center p-6">
-                        <motion.div 
-                            initial={{ opacity: 0 }}
-                            animate={{ opacity: 1 }}
-                            onClick={() => setShowModeConfirm(false)}
-                            className="absolute inset-0 bg-slate-900/60 backdrop-blur-md"
-                        />
-                        <motion.div 
-                            initial={{ scale: 0.9, opacity: 0, y: 20 }}
-                            animate={{ scale: 1, opacity: 1, y: 0 }}
-                            className="relative bg-white w-full max-w-lg rounded-[48px] shadow-2xl overflow-hidden border border-slate-100"
-                        >
-                            <div className="p-12 text-center">
-                                {mode === 'mock' ? (
-                                    <>
-                                        <div className="w-24 h-24 bg-emerald-50 rounded-[32px] flex items-center justify-center mx-auto mb-8 text-emerald-600 shadow-inner">
-                                            <ShieldCheck className="w-10 h-10" />
-                                        </div>
-                                        <h3 className="text-3xl font-black text-slate-900 tracking-tighter italic uppercase mb-4">Engage Live Sync?</h3>
-                                        <p className="text-slate-500 font-medium leading-relaxed mb-10">
-                                            You are about to switch from the <span className="text-orange-600 font-bold uppercase tracking-widest text-[10px]">Mock Environment</span> to <span className="text-emerald-600 font-bold uppercase tracking-widest text-[10px]">Live Production</span>. 
-                                            All trades executed in this mode will involve real capital through your connected broker.
-                                        </p>
-                                        <div className="flex flex-col gap-4">
-                                            <button 
-                                                onClick={async () => {
-                                                    try {
-                                                        const res = await api.post('/portfolio/sync-broker', { 
-                                                            brokerType: selectedBroker,
-                                                            apiKey: 'PERSISTED_IN_DB' 
-                                                        });
-                                                        if (res.data.loginUrl) {
-                                                            const isExpired = !!user?.brokerAccess;
-                                                            toast.error(isExpired ? 'Session Expired. Please reconnect in Settings.' : 'Broker not authorized. Please visit Settings.');
-                                                            setShowModeConfirm(false);
-                                                            return;
-                                                        }
-                                                        if (res.data.synced >= 0) {
-                                                            setMode('live');
-                                                            setShowModeConfirm(false);
-                                                            fetchData();
-                                                            toast.success(`${selectedBroker.toUpperCase()} Sync Successful`);
-                                                        }
-                                                    } catch (err) {
-                                                        setShowModeConfirm(false);
-                                                        toast.error(!user?.brokerApiKey ? 'Broker Not Configured. Please visit Settings.' : 'Handshake Failed. Re-authenticate in Settings.');
-                                                    }
-                                                }}
-                                                className="w-full py-6 bg-emerald-600 text-white rounded-[24px] font-black text-xs uppercase tracking-[0.2em] shadow-xl shadow-emerald-900/20 hover:bg-emerald-700 transition-all active:scale-95"
-                                            >
-                                                Activate Production Mode
-                                            </button>
-                                            <button onClick={() => setShowModeConfirm(false)} className="w-full py-6 bg-slate-50 text-slate-400 rounded-[24px] font-black text-xs uppercase tracking-[0.2em] hover:bg-slate-100 transition-all">Stay in Mock Deck</button>
-                                        </div>
-                                    </>
-                                ) : (
-                                    <>
-                                        <div className="w-24 h-24 bg-orange-50 rounded-[32px] flex items-center justify-center mx-auto mb-8 text-orange-600 shadow-inner">
-                                            <ShieldAlert className="w-10 h-10" />
-                                        </div>
-                                        <h3 className="text-3xl font-black text-slate-900 tracking-tighter italic uppercase mb-4">Enter Simulation?</h3>
-                                        <p className="text-slate-500 font-medium leading-relaxed mb-10">
-                                            You are reverting to the <span className="text-orange-600 font-bold uppercase tracking-widest text-[10px]">Mock Environment</span>. 
-                                            Live broker synchronization will be suspended. All trades will use virtual balance.
-                                        </p>
-                                        <div className="flex flex-col gap-4">
-                                            <button 
-                                                onClick={() => {
-                                                    setMode('mock');
-                                                    setShowModeConfirm(false);
-                                                    fetchData();
-                                                    toast.success('Simulation Mode Engaged');
-                                                }}
-                                                className="w-full py-6 bg-slate-900 text-white rounded-[24px] font-black text-xs uppercase tracking-[0.2em] shadow-xl shadow-slate-900/20 hover:bg-orange-600 transition-all active:scale-95"
-                                            >
-                                                Switch to Mock Deck
-                                            </button>
-                                            <button onClick={() => setShowModeConfirm(false)} className="w-full py-6 bg-slate-50 text-slate-400 rounded-[24px] font-black text-xs uppercase tracking-[0.2em] hover:bg-slate-100 transition-all">Stay in Live Sync</button>
-                                        </div>
-                                    </>
-                                )}
-                            </div>
-                        </motion.div>
-                    </div>
-                )}
-                {/* Broker Credentials Modal */}
-                {showBrokerModal && (
-                    <div className="fixed inset-0 z-[110] flex items-center justify-center p-6">
-                        <motion.div 
-                            initial={{ opacity: 0 }}
-                            animate={{ opacity: 1 }}
-                            onClick={() => setShowBrokerModal(false)}
-                            className="absolute inset-0 bg-slate-900/60 backdrop-blur-md"
-                        />
-                        <motion.div 
-                            initial={{ scale: 0.9, opacity: 0, y: 20 }}
-                            animate={{ scale: 1, opacity: 1, y: 0 }}
-                            className="relative bg-white w-full max-w-xl rounded-[48px] shadow-2xl overflow-hidden"
-                        >
-                            <div className="p-12">
-                                <div className="flex justify-between items-center mb-10">
-                                    <div className="flex items-center gap-4">
-                                        <div className="w-16 h-16 bg-slate-900 rounded-[24px] flex items-center justify-center text-white">
-                                            <ShieldAlert className="w-8 h-8" />
-                                        </div>
-                                        <div>
-                                            <h3 className="text-2xl font-black text-slate-900 italic tracking-tight uppercase">Connect {selectedBroker}</h3>
-                                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Secure Broker Handshake</p>
-                                        </div>
+                <AnimatePresence>
+                    {showAddModal && (
+                        <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-slate-900/60 backdrop-blur-md">
+                            <motion.div 
+                                initial={{ opacity: 0, scale: 0.9, y: 20 }} 
+                                animate={{ opacity: 1, scale: 1, y: 0 }} 
+                                exit={{ opacity: 0, scale: 0.9, y: 20 }}
+                                className="bg-white p-10 w-full max-w-lg rounded-[48px] shadow-2xl relative border border-slate-200"
+                            >
+                                <div className="flex items-center gap-4 mb-8">
+                                    <div className={`p-4 rounded-[20px] text-white ${newItem.type === 'BUY' ? 'bg-emerald-600' : 'bg-rose-600'}`}>
+                                        <Zap className="w-6 h-6" />
                                     </div>
-                                    <button onClick={() => setShowBrokerModal(false)} className="p-4 bg-slate-50 rounded-2xl hover:bg-rose-50 hover:text-rose-600 transition-colors">
-                                        <X className="w-6 h-6" />
-                                    </button>
+                                    <div>
+                                        <h3 className="text-2xl font-black text-slate-900 italic tracking-tight uppercase italic">Secure Transmission</h3>
+                                        <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest">Executing {newItem.type} Order</p>
+                                    </div>
                                 </div>
 
-                                <div className="space-y-6">
+                                <form onSubmit={handleMockOrder} className="space-y-6">
+                                    <div className="flex bg-slate-100 p-1.5 rounded-[20px] mb-6">
+                                        <button 
+                                            type="button"
+                                            onClick={() => setNewItem({...newItem, type: 'BUY'})}
+                                            className={`flex-1 py-3 rounded-xl font-black text-[10px] uppercase tracking-widest transition-all ${newItem.type === 'BUY' ? 'bg-white text-emerald-600 shadow-sm' : 'text-slate-400'}`}
+                                        >
+                                            Buy Signal
+                                        </button>
+                                        <button 
+                                            type="button"
+                                            onClick={() => setNewItem({...newItem, type: 'SELL'})}
+                                            className={`flex-1 py-3 rounded-xl font-black text-[10px] uppercase tracking-widest transition-all ${newItem.type === 'SELL' ? 'bg-white text-rose-600 shadow-sm' : 'text-slate-400'}`}
+                                        >
+                                            Sell Signal
+                                        </button>
+                                    </div>
+
                                     <div className="space-y-2">
-                                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">API Key</label>
+                                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Asset Identification</label>
                                         <input 
                                             type="text" 
-                                            className="w-full p-6 bg-slate-50 border border-slate-100 rounded-3xl text-sm font-black focus:outline-none focus:border-orange-600/30 transition-all" 
-                                            value={brokerCredentials.apiKey}
-                                            onChange={(e) => setBrokerCredentials({...brokerCredentials, apiKey: e.target.value})}
-                                            placeholder="Enter your broker API key"
+                                            placeholder="E.g. RELIANCE" 
+                                            className="w-full p-6 bg-slate-50 border border-slate-100 rounded-3xl text-lg font-black focus:outline-none focus:ring-4 focus:ring-orange-600/5 focus:border-orange-600/30 transition-all uppercase" 
+                                            value={newItem.symbol}
+                                            onChange={(e) => setNewItem({...newItem, symbol: e.target.value})}
                                         />
                                     </div>
                                     <div className="space-y-2">
-                                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">API Secret / Password</label>
-                                        <input 
-                                            type="password" 
-                                            className="w-full p-6 bg-slate-50 border border-slate-100 rounded-3xl text-sm font-black focus:outline-none focus:border-orange-600/30 transition-all" 
-                                            value={brokerCredentials.apiSecret}
-                                            onChange={(e) => setBrokerCredentials({...brokerCredentials, apiSecret: e.target.value})}
-                                            placeholder="••••••••••••"
-                                        />
+                                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Share Quantity</label>
+                                        <input type="number" placeholder="00" className="w-full p-6 bg-slate-50 border border-slate-100 rounded-3xl text-lg font-black focus:outline-none border-slate-100 focus:border-orange-600/30 transition-all" value={newItem.quantity} onChange={(e) => setNewItem({...newItem, quantity: e.target.value})} />
                                     </div>
-                                    {selectedBroker === 'zerodha' && (
-                                        <div className="space-y-2">
-                                            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Request Token</label>
-                                            <input 
-                                                type="text" 
-                                                className="w-full p-6 bg-slate-50 border border-slate-100 rounded-3xl text-sm font-black focus:outline-none focus:border-orange-600/30 transition-all" 
-                                                value={brokerCredentials.requestToken}
-                                                onChange={(e) => setBrokerCredentials({...brokerCredentials, requestToken: e.target.value})}
-                                                placeholder="Enter fresh Request Token"
-                                            />
-                                        </div>
-                                    )}
-
-                                    <button 
-                                        onClick={async () => {
-                                            try {
-                                                const res = await api.post('/portfolio/sync-broker', {
-                                                    brokerType: selectedBroker,
-                                                    apiKey: brokerCredentials.apiKey,
-                                                    apiSecret: brokerCredentials.apiSecret,
-                                                    requestToken: brokerCredentials.requestToken
-                                                });
-                                                if (res.data.synced >= 0) {
-                                                    setMode('live');
-                                                    setShowBrokerModal(false);
-                                                    setBrokerCredentials(prev => ({ ...prev, requestToken: '' })); // Clear temporary token
-                                                    fetchData();
-                                                    toast.success('Live Broker Connected & Synced');
-                                                }
-                                            } catch (err) {
-                                                toast.error(err.response?.data?.error || 'Sync Failed. Verify credentials.');
-                                            }
-                                        }}
-                                        className="w-full py-6 bg-slate-900 text-white rounded-[24px] font-black text-xs uppercase tracking-[0.2em] shadow-xl hover:bg-orange-600 transition-all active:scale-95"
-                                    >
-                                        Establish Live Connection
-                                    </button>
                                     
-                                    <p className="text-[9px] text-center text-slate-400 font-bold uppercase tracking-widest leading-relaxed">
-                                        Your credentials are encrypted and never stored in plain text. <br/> Connections are handled via official broker APIs only.
+                                    <div className="flex gap-4 pt-6">
+                                        <button type="button" onClick={() => setShowAddModal(false)} className="flex-1 p-6 rounded-3xl border border-slate-100 font-black text-slate-400 uppercase tracking-widest hover:bg-slate-50 transition-colors">Abort</button>
+                                        <button type="submit" className={`flex-1 p-6 rounded-3xl text-white font-black text-xs uppercase tracking-[0.2em] transition-all shadow-xl ${newItem.type === 'BUY' ? 'bg-emerald-600 shadow-emerald-900/10' : 'bg-rose-600 shadow-rose-900/10'}`}>
+                                            Transmit {newItem.type}
+                                        </button>
+                                    </div>
+                                </form>
+                            </motion.div>
+                        </div>
+                    )}
+                </AnimatePresence>
+
+                <AnimatePresence>
+                    {showExecuteConfirm && (
+                        <div className="fixed inset-0 z-[250] flex items-center justify-center p-6">
+                            <motion.div 
+                                initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+                                onClick={() => {
+                                    setShowExecuteConfirm(false);
+                                    setPendingExecution(null);
+                                }}
+                                className="absolute inset-0 bg-slate-900/60 backdrop-blur-md"
+                            />
+                            <motion.div 
+                                initial={{ scale: 0.9, opacity: 0, y: 20 }}
+                                animate={{ scale: 1, opacity: 1, y: 0 }}
+                                className="relative bg-white w-full max-w-lg rounded-[48px] shadow-2xl overflow-hidden border border-slate-100"
+                            >
+                                <div className="p-12 text-center">
+                                    <div className="w-24 h-24 bg-emerald-50 rounded-[32px] flex items-center justify-center mx-auto mb-8 text-emerald-600 shadow-inner">
+                                        <ShieldCheck className="w-10 h-10" />
+                                    </div>
+                                    <h3 className="text-3xl font-black text-slate-900 tracking-tighter italic uppercase mb-4">Confirm Transmission</h3>
+                                    <p className="text-slate-500 font-medium leading-relaxed mb-8">
+                                        You are about to transmit this order directly to the <span className="text-emerald-600 font-black uppercase tracking-widest text-[10px]">{selectedBroker}</span> production environment.
                                     </p>
+                                    
+                                    <div className="bg-slate-50 p-6 rounded-3xl mb-10 text-left border border-slate-100">
+                                        <div className="flex justify-between items-center mb-2">
+                                            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Ticker</span>
+                                            <span className="font-black text-slate-900 uppercase">{pendingExecution?.trades?.[0]?.symbol}</span>
+                                        </div>
+                                        <div className="flex justify-between items-center mb-2">
+                                            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Quantity</span>
+                                            <span className="font-black text-slate-900">{pendingExecution?.trades?.[0]?.quantity} Units</span>
+                                        </div>
+                                        <div className="flex justify-between items-center">
+                                            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Est. Value</span>
+                                            <span className="font-black text-emerald-600">₹{pendingExecution?.trades?.[0]?.amount?.toLocaleString()}</span>
+                                        </div>
+                                    </div>
+
+                                    <div className="flex flex-col gap-4">
+                                        <button 
+                                            onClick={confirmAndExecute}
+                                            className="w-full py-6 bg-emerald-600 text-white rounded-[24px] font-black text-xs uppercase tracking-[0.2em] shadow-xl shadow-emerald-900/20 hover:bg-emerald-700 transition-all active:scale-95"
+                                        >
+                                            Execute Real Order
+                                        </button>
+                                        <button 
+                                            onClick={() => {
+                                                setShowExecuteConfirm(false);
+                                                setPendingExecution(null);
+                                            }} 
+                                            className="w-full py-6 bg-slate-50 text-slate-400 rounded-[24px] font-black text-xs uppercase tracking-[0.2em] hover:bg-slate-100 transition-all"
+                                        >
+                                            Abort Transmission
+                                        </button>
+                                    </div>
                                 </div>
-                            </div>
-                        </motion.div>
-                    </div>
-                )}
+                            </motion.div>
+                        </div>
+                    )}
+                </AnimatePresence>
+
+                <AnimatePresence>
+                    {showModeConfirm && (
+                        <div className="fixed inset-0 z-[200] flex items-center justify-center p-6">
+                            <motion.div 
+                                initial={{ opacity: 0 }}
+                                animate={{ opacity: 1 }}
+                                onClick={() => setShowModeConfirm(false)}
+                                className="absolute inset-0 bg-slate-900/60 backdrop-blur-md"
+                            />
+                            <motion.div 
+                                initial={{ scale: 0.9, opacity: 0, y: 20 }}
+                                animate={{ scale: 1, opacity: 1, y: 0 }}
+                                className="relative bg-white w-full max-w-lg rounded-[48px] shadow-2xl overflow-hidden border border-slate-100"
+                            >
+                                <div className="p-12 text-center">
+                                    {mode === 'mock' ? (
+                                        <>
+                                            <div className="w-24 h-24 bg-emerald-50 rounded-[32px] flex items-center justify-center mx-auto mb-8 text-emerald-600 shadow-inner">
+                                                <ShieldCheck className="w-10 h-10" />
+                                            </div>
+                                            <h3 className="text-3xl font-black text-slate-900 tracking-tighter italic uppercase mb-4">Engage Live Sync?</h3>
+                                            <p className="text-slate-500 font-medium leading-relaxed mb-10">
+                                                You are about to switch from the <span className="text-orange-600 font-bold uppercase tracking-widest text-[10px]">Mock Environment</span> to <span className="text-emerald-600 font-bold uppercase tracking-widest text-[10px]">Live Production</span>. 
+                                                All trades executed in this mode will involve real capital through your connected broker.
+                                            </p>
+                                            <div className="flex flex-col gap-4">
+                                                <button 
+                                                    onClick={async () => {
+                                                        try {
+                                                            const res = await api.post('/portfolio/sync-broker', { 
+                                                                brokerType: selectedBroker,
+                                                                apiKey: 'PERSISTED_IN_DB' 
+                                                            });
+                                                            if (res.data.loginUrl) {
+                                                                const isExpired = !!user?.brokerAccess;
+                                                                toast.error(isExpired ? 'Session Expired. Please reconnect in Settings.' : 'Broker not authorized. Please visit Settings.');
+                                                                setShowModeConfirm(false);
+                                                                return;
+                                                            }
+                                                            if (res.data.synced >= 0) {
+                                                                setMode('live');
+                                                                setShowModeConfirm(false);
+                                                                fetchData();
+                                                                toast.success(`${selectedBroker.toUpperCase()} Sync Successful`);
+                                                            }
+                                                        } catch (err) {
+                                                            setShowModeConfirm(false);
+                                                            toast.error(!user?.brokerApiKey ? 'Broker Not Configured. Please visit Settings.' : 'Handshake Failed. Re-authenticate in Settings.');
+                                                        }
+                                                    }}
+                                                    className="w-full py-6 bg-emerald-600 text-white rounded-[24px] font-black text-xs uppercase tracking-[0.2em] shadow-xl shadow-emerald-900/20 hover:bg-emerald-700 transition-all active:scale-95"
+                                                >
+                                                    Activate Production Mode
+                                                </button>
+                                                <button onClick={() => setShowModeConfirm(false)} className="w-full py-6 bg-slate-50 text-slate-400 rounded-[24px] font-black text-xs uppercase tracking-[0.2em] hover:bg-slate-100 transition-all">Stay in Mock Deck</button>
+                                            </div>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <div className="w-24 h-24 bg-orange-50 rounded-[32px] flex items-center justify-center mx-auto mb-8 text-orange-600 shadow-inner">
+                                                <ShieldAlert className="w-10 h-10" />
+                                            </div>
+                                            <h3 className="text-3xl font-black text-slate-900 tracking-tighter italic uppercase mb-4">Enter Simulation?</h3>
+                                            <p className="text-slate-500 font-medium leading-relaxed mb-10">
+                                                You are reverting to the <span className="text-orange-600 font-bold uppercase tracking-widest text-[10px]">Mock Environment</span>. 
+                                                Live broker synchronization will be suspended. All trades will use virtual balance.
+                                            </p>
+                                            <div className="flex flex-col gap-4">
+                                                <button 
+                                                    onClick={() => {
+                                                        setMode('mock');
+                                                        setShowModeConfirm(false);
+                                                        fetchData();
+                                                        toast.success('Simulation Mode Engaged');
+                                                    }}
+                                                    className="w-full py-6 bg-slate-900 text-white rounded-[24px] font-black text-xs uppercase tracking-[0.2em] shadow-xl shadow-slate-900/20 hover:bg-orange-600 transition-all active:scale-95"
+                                                >
+                                                    Switch to Mock Deck
+                                                </button>
+                                                <button onClick={() => setShowModeConfirm(false)} className="w-full py-6 bg-slate-50 text-slate-400 rounded-[24px] font-black text-xs uppercase tracking-[0.2em] hover:bg-slate-100 transition-all">Stay in Live Sync</button>
+                                            </div>
+                                        </>
+                                    )}
+                                </div>
+                            </motion.div>
+                        </div>
+                    )}
+                </AnimatePresence>
             </AnimatePresence>
         </div>
     );

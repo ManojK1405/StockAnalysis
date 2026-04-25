@@ -64,7 +64,7 @@ async function manageUserWealth(user) {
 
         // 2. INTELLIGENT ASSET ACQUISITION
         // Check "Available Balance" - mockBalance for mock, or we assume a constant for live for now
-        const currentBalance = user.tradingMode === 'mock' ? user.mockBalance : 50000; // Live mode needs actual cash check, assuming 50k for demo
+        const currentBalance = user.tradingMode === 'mock' ? user.mockBalance : 10000; // Live mode needs actual cash check, assuming 10k for demo
 
         if (portfolio.length < 5 && currentBalance > 5000) {
             const candidate = await findHighMomentumCandidate(user);
