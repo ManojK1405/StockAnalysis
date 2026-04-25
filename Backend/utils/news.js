@@ -18,9 +18,13 @@ export const fetchStockNews = async (symbol, name, sector) => {
     },
     extraTerm = synonyms[cleanSymbol] || '';
 
+    // NewsAPI Circuit Breaker (Static tracker)
+    if (!global.newsApiBackoff) global.newsApiBackoff = 0;
+    const isBackoffActive = Date.now() < global.newsApiBackoff;
+
     // 1. Fetch from NewsAPI (Everything endpoint)
     const newsApiArticles = [];
-    if (apiKey) {
+    if (apiKey && !isBackoffActive) {
         try {
             const marketContext = isIndian ? ' (India OR NSE OR BSE)' : '';
             const query = `("${name}"${extraTerm ? ` OR "${extraTerm}"` : ''} OR "${cleanSymbol}") AND (stock OR shares OR profit OR earnings OR market)${marketContext}`;
@@ -37,27 +41,40 @@ export const fetchStockNews = async (symbol, name, sector) => {
             });
             newsApiArticles.push(...(resp.data.articles || []));
         } catch (e) {
-            console.error("NewsAPI Error:", e.message);
+            if (e.response?.status === 429) {
+                console.warn("[NewsAPI] Rate limit reached (429). Silencing for 15 minutes.");
+                global.newsApiBackoff = Date.now() + 15 * 60 * 1000;
+            } else {
+                console.error("NewsAPI Error:", e.message);
+            }
         }
 
         // 1b. Fetch General Market News from NewsAPI
-        try {
-            const marketQuery = `(Nifty 50 OR Sensex OR "Indian stock market" OR "RBI" OR "NSE India") AND (stock OR market OR economy)`;
-            const marketResp = await axios.get(`https://newsapi.org/v2/everything`, {
-                params: {
-                    q: marketQuery,
-                    searchIn: 'title,description',
-                    sortBy: 'publishedAt',
-                    language: 'en',
-                    pageSize: 8,
-                    apiKey: apiKey
+        if (Date.now() > global.newsApiBackoff) {
+            try {
+                const marketQuery = `(Nifty 50 OR Sensex OR "Indian stock market" OR "RBI" OR "NSE India") AND (stock OR market OR economy)`;
+                const marketResp = await axios.get(`https://newsapi.org/v2/everything`, {
+                    params: {
+                        q: marketQuery,
+                        searchIn: 'title,description',
+                        sortBy: 'publishedAt',
+                        language: 'en',
+                        pageSize: 8,
+                        apiKey: apiKey
+                    }
+                });
+                const marketArticles = (marketResp.data.articles || []).map(a => ({ ...a, isMarketNews: true }));
+                newsApiArticles.push(...marketArticles);
+            } catch (e) {
+                if (e.response?.status === 429) {
+                    global.newsApiBackoff = Date.now() + 15 * 60 * 1000;
+                } else {
+                    console.error("Market NewsAPI Error:", e.message);
                 }
-            });
-            const marketArticles = (marketResp.data.articles || []).map(a => ({ ...a, isMarketNews: true }));
-            newsApiArticles.push(...marketArticles);
-        } catch (e) {
-            console.error("Market NewsAPI Error:", e.message);
+            }
         }
+    } else if (isBackoffActive) {
+        // Silently skip or log once
     }
 
     // 2. Fetch from Yahoo Finance (Search endpoint)

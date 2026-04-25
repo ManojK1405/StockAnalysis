@@ -1,139 +1,335 @@
-import React, { useState, useEffect } from 'react';
-import { History, Target, Calculator, PieChart, ArrowRight, Wallet, Shield } from 'lucide-react';
-import { motion } from 'framer-motion';
+import React, { useState } from 'react';
+import { Target, Calculator, TrendingUp, ShieldCheck, Layers, RefreshCw, ArrowRight, Sparkles, Zap, PieChart } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
 import api from '../api';
 
-const ReverseStrategist = () => {
-    const [goal, setGoal] = useState(10000000); // 1 Crore
-    const [years, setYears] = useState(10);
-    const [goalData, setGoalData] = useState(null);
-    const [loading, setLoading] = useState(false);
+const formatINR = (val) => {
+    if (!val) return '₹--';
+    if (val >= 10000000) return `₹${(val / 10000000).toFixed(2)} Cr`;
+    if (val >= 100000) return `₹${(val / 100000).toFixed(2)} L`;
+    return `₹${Math.round(val).toLocaleString()}`;
+};
 
-    const calculateGoal = async () => {
+const allocationColors = {
+    Stock: 'bg-indigo-500',
+    Debt: 'bg-blue-400',
+    Gold: 'bg-amber-400',
+    Cash: 'bg-emerald-400',
+};
+
+const allocationBadgeColors = {
+    Stock: 'bg-indigo-50 text-indigo-600 border-indigo-100',
+    Debt: 'bg-blue-50 text-blue-600 border-blue-100',
+    Gold: 'bg-amber-50 text-amber-600 border-amber-100',
+    Cash: 'bg-emerald-50 text-emerald-600 border-emerald-100',
+};
+
+const ReverseStrategist = () => {
+    const [goalQuery, setGoalQuery] = useState('');
+    const [loading, setLoading] = useState(false);
+    const [result, setResult] = useState(null);
+    const [error, setError] = useState(null);
+
+    const goalExamples = [
+        'Buy a house worth ₹2 Crore in 8 years',
+        'Retire with ₹5 Crore corpus in 20 years',
+        'Fund my child\'s foreign education in 15 years',
+        'Buy a Porsche Cayenne in 6 years',
+        'Save ₹1 Crore emergency fund in 5 years',
+    ];
+
+    const handleGenerate = async (previousResult = null) => {
+        if (!goalQuery.trim()) return;
         setLoading(true);
+        setError(null);
         try {
-            const res = await api.post('/strategy/reverse', { 
-                goalQuery: `Buy a asset worth ₹${goal} in ${years} years` 
-            });
-            setGoalData(res.data);
+            const payload = { goalQuery };
+            if (previousResult) payload.previousResult = previousResult;
+            const res = await api.post('/strategy/reverse', payload);
+            setResult(res.data);
         } catch (e) {
             console.error(e);
+            setError('Blueprint generation failed. Please refine your goal.');
         } finally {
             setLoading(false);
         }
     };
 
-    useEffect(() => {
-        calculateGoal();
-    }, [goal, years]);
+    const feasibilityColor = (score) => {
+        if (score >= 75) return 'text-emerald-400';
+        if (score >= 50) return 'text-amber-400';
+        return 'text-rose-400';
+    };
 
     return (
-        <div className="bg-white min-h-screen font-sans">
-            <div className="max-w-7xl mx-auto px-6 py-12 lg:py-24">
-                <div className="text-center mb-20">
-                    <motion.div 
-                        initial={{ opacity: 0, y: 10 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-rose-50 text-rose-600 font-bold text-[10px] uppercase tracking-wider mb-6 border border-rose-100"
-                    >
-                        <History className="w-3.5 h-3.5" />
-                        Backward Wealth Planning
-                    </motion.div>
-                    <h1 className="text-5xl md:text-7xl font-bold text-slate-900 tracking-tight mb-6">
-                        Reverse <span className="text-rose-500">Strategist</span>
-                    </h1>
-                    <p className="text-xl text-slate-500 max-w-2xl mx-auto leading-relaxed">
-                        Don't guess your returns. Define your destination, and let our engine calculate the path to get there.
-                    </p>
-                </div>
+        <div className="bg-white min-h-screen font-sans selection:bg-indigo-100 selection:text-indigo-900 relative">
+            {/* Immersive Background */}
+            <div className="fixed inset-0 pointer-events-none">
+                <div className="absolute top-0 right-0 w-[1000px] h-[1000px] bg-rose-600/5 blur-[150px] rounded-full -mr-96 -mt-96" />
+                <div className="absolute bottom-0 left-0 w-[800px] h-[800px] bg-indigo-600/5 blur-[150px] rounded-full -ml-48 -mb-48" />
+            </div>
 
-                <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-stretch">
-                    <div className="lg:col-span-4 space-y-8">
-                        <div className="bg-white p-10 rounded-[48px] border border-slate-200 shadow-xl">
-                            <h3 className="text-xl font-bold text-slate-900 mb-8 flex items-center gap-2">
-                                <Target className="w-6 h-6 text-rose-500" />
-                                Your Target
-                            </h3>
-                            <div className="space-y-8">
-                                <div>
-                                    <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">Portfolio Goal (₹)</label>
-                                    <input 
-                                        type="range" 
-                                        min="100000" 
-                                        max="100000000" 
-                                        step="100000"
-                                        className="w-full h-2 bg-rose-100 rounded-lg appearance-none cursor-pointer accent-rose-500"
-                                        value={goal}
-                                        onChange={(e) => setGoal(Number(e.target.value))}
-                                    />
-                                    <div className="mt-4 text-3xl font-black text-slate-900">₹{(goal / 10000000).toFixed(1)} Cr</div>
+            <div className="max-w-7xl mx-auto px-6 pt-32 pb-24 relative z-10">
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-16 items-start">
+
+                    {/* ── Left Column: Goal Input ── */}
+                    <div className="lg:col-span-5 space-y-10">
+                        <motion.div
+                            initial={{ opacity: 0, x: -30 }}
+                            animate={{ opacity: 1, x: 0 }}
+                            transition={{ duration: 0.8 }}
+                        >
+                            {/* Mode badge */}
+                            <div className="flex items-center gap-2 mb-10 bg-slate-100 p-1.5 rounded-full inline-flex border border-slate-200">
+                                <div className="flex items-center gap-2 px-5 py-2.5 rounded-full bg-slate-900 text-white text-[10px] font-black uppercase tracking-[0.2em]">
+                                    <Target className="w-3 h-3 text-rose-400" />
+                                    Goal-Based Planning
                                 </div>
-                                <div>
-                                    <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">Timeframe (Years)</label>
-                                    <div className="grid grid-cols-5 gap-2">
-                                        {[3, 5, 10, 15, 25].map(y => (
-                                            <button 
-                                                key={y}
-                                                onClick={() => setYears(y)}
-                                                className={`py-3 rounded-2xl font-bold text-xs transition-all ${years === y ? 'bg-rose-500 text-white' : 'bg-slate-50 text-slate-500 hover:bg-slate-100'}`}
+                            </div>
+
+                            <h1 className="text-5xl font-black text-slate-900 tracking-tighter leading-tight mb-8">
+                                Reverse{' '}
+                                <span className="bg-clip-text text-transparent bg-gradient-to-br from-rose-500 to-orange-500 italic">
+                                    Strategist
+                                </span>
+                            </h1>
+
+                            {/* Input Form */}
+                            <div className="bg-white p-8 rounded-[40px] border border-slate-100 shadow-xl space-y-8 relative overflow-hidden">
+                                <div className="absolute top-0 right-0 w-32 h-32 bg-rose-50/50 blur-3xl rounded-full -mr-16 -mt-16" />
+
+                                {/* Goal Input */}
+                                <div className="space-y-4 relative z-10">
+                                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">
+                                        Describe Your Financial Goal
+                                    </label>
+                                    <textarea
+                                        placeholder="e.g. Buy a house worth ₹2 Crore in 8 years"
+                                        className="w-full p-5 bg-slate-50 border border-slate-100 rounded-2xl font-medium text-slate-900 focus:outline-none focus:border-rose-400 focus:ring-4 focus:ring-rose-500/5 transition-all min-h-[100px] resize-none text-sm"
+                                        value={goalQuery}
+                                        onChange={(e) => setGoalQuery(e.target.value)}
+                                    />
+                                </div>
+
+                                {/* Quick Examples */}
+                                <div className="space-y-3 relative z-10">
+                                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Quick Examples</label>
+                                    <div className="flex flex-wrap gap-2">
+                                        {goalExamples.map((ex, i) => (
+                                            <button
+                                                key={i}
+                                                onClick={() => setGoalQuery(ex)}
+                                                className="px-3 py-1.5 rounded-xl text-[10px] font-black text-slate-500 bg-slate-50 border border-slate-100 hover:bg-rose-50 hover:text-rose-600 hover:border-rose-100 transition-all"
                                             >
-                                                {y}Y
+                                                {ex.length > 32 ? ex.slice(0, 32) + '…' : ex}
                                             </button>
                                         ))}
                                     </div>
                                 </div>
-                            </div>
-                        </div>
 
-                        <div className="bg-slate-900 p-10 rounded-[48px] text-white">
-                            <div className="w-12 h-12 rounded-2xl bg-rose-500 flex items-center justify-center mb-6">
-                                <Calculator className="w-6 h-6 text-white" />
+                                {/* Generate Button */}
+                                <button
+                                    onClick={handleGenerate}
+                                    disabled={loading || !goalQuery.trim()}
+                                    className="w-full py-5 bg-gradient-to-r from-rose-500 to-orange-500 rounded-2xl text-white font-black text-xs uppercase tracking-[0.2em] shadow-xl shadow-rose-900/20 hover:scale-[1.02] active:scale-[0.98] transition-all flex items-center justify-center gap-3 disabled:opacity-50"
+                                >
+                                    {loading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4 fill-current" />}
+                                    {loading ? 'Blueprinting...' : 'Generate Blueprint'}
+                                </button>
                             </div>
-                            <h4 className="text-xl font-bold mb-4">Required Monthly Savings</h4>
-                            <div className={`text-4xl font-black text-rose-400 mb-2 ${loading ? 'animate-pulse opacity-50' : ''}`}>
-                                ₹{goalData ? goalData.monthlySIP.toLocaleString() : '---'}
+
+                            {/* Info cards */}
+                            <div className="space-y-4 mt-6">
+                                <div className="bg-slate-50 border border-slate-100 rounded-2xl p-6">
+                                    <h5 className="font-black text-slate-800 text-sm mb-4">How it works</h5>
+                                    <ol className="space-y-3">
+                                        {[
+                                            'Describe any financial goal in plain language',
+                                            'AI estimates current and inflation-adjusted future cost',
+                                            'Calculates required monthly SIP at 12.5% CAGR',
+                                            'Blueprints a diversified asset allocation plan',
+                                            'Scores feasibility and gives expert advisory notes',
+                                        ].map((step, i) => (
+                                            <li key={i} className="flex items-start gap-3">
+                                                <span className="text-[10px] font-black text-slate-400 w-4 shrink-0 mt-0.5">{i + 1}</span>
+                                                <span className="text-[12px] text-slate-600 font-medium leading-snug">{step}</span>
+                                            </li>
+                                        ))}
+                                    </ol>
+                                </div>
                             </div>
-                            <p className="text-slate-400 text-sm italic">*Assuming {goalData?.assumedAnnualReturn || '12.5'}% CAGR performance</p>
-                        </div>
+                        </motion.div>
                     </div>
 
-                    <div className="lg:col-span-8 bg-white p-10 rounded-[48px] border border-slate-200 shadow-xl flex flex-col justify-between">
-                        <div>
-                            <div className="flex justify-between items-center mb-12">
-                                <h3 className="text-2xl font-bold text-slate-900">{goalData?.goalTitle || 'Financial Blueprint'}</h3>
-                                <Shield className="w-8 h-8 text-emerald-500 opacity-20" />
-                            </div>
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-12">
-                                <div className="space-y-8">
-                                    {goalData?.allocation?.map((alloc, i) => (
-                                        <div key={i} className="flex gap-6">
-                                            <div className="w-14 h-14 rounded-2xl bg-slate-50 flex items-center justify-center text-slate-900 shrink-0 font-black border border-slate-100">
-                                                {alloc.percentage}%
-                                            </div>
-                                            <div>
-                                                <h5 className="font-bold text-slate-900">{alloc.type}</h5>
-                                                <p className="text-sm text-slate-500">{alloc.assets}</p>
-                                            </div>
-                                        </div>
-                                    ))}
-                                    {!goalData && <p className="text-slate-400 italic">Adjust your goal to generate allocation...</p>}
-                                </div>
-                                <div className="flex items-center justify-center relative">
-                                    <div className="w-64 h-64 rounded-full border-[16px] border-slate-50 flex items-center justify-center relative">
-                                        <div className="absolute inset-0 rounded-full border-[16px] border-rose-500 border-t-transparent border-l-transparent rotate-[45deg]" />
-                                        <div className="text-center p-6">
-                                            <div className="text-4xl font-black text-slate-900">₹{(goalData?.futureValuation / 10000000)?.toFixed(1) || '--'} Cr</div>
-                                            <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-2">FUTURE VALUE (ADJUSTED)</div>
+                    {/* ── Right Column: Blueprint Output ── */}
+                    <div className="lg:col-span-7">
+                        <motion.div
+                            initial={{ opacity: 0, scale: 0.98, y: 20 }}
+                            animate={{ opacity: 1, scale: 1, y: 0 }}
+                            className="bg-white rounded-[60px] border border-slate-200 shadow-[0_40px_100px_rgba(0,0,0,0.08)] flex flex-col overflow-hidden relative min-h-[500px]"
+                        >
+                            {/* Header */}
+                            <div className="p-8 border-b border-slate-100 bg-slate-50/50 flex items-center justify-between backdrop-blur-xl relative z-10 shrink-0">
+                                <div className="flex items-center gap-4">
+                                    <div className={`w-12 h-12 rounded-2xl flex items-center justify-center text-white shadow-xl ${result ? 'bg-rose-500 shadow-rose-900/20' : 'bg-slate-900 shadow-slate-900/20'}`}>
+                                        {result ? <Calculator className="w-6 h-6" /> : <Target className="w-6 h-6" />}
+                                    </div>
+                                    <div>
+                                        <h3 className="text-lg font-black text-slate-900 tracking-tight leading-none mb-1.5">
+                                            {result ? result.goalTitle : 'Wealth Blueprint Engine'}
+                                        </h3>
+                                        <div className="flex items-center gap-2">
+                                            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                                            <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest">
+                                                {result ? `${result.timeframeYears}-Year Inflation-Adjusted Plan` : 'Awaiting Goal Mandate'}
+                                            </p>
                                         </div>
                                     </div>
                                 </div>
                             </div>
-                        </div>
 
-                        <button className="w-full mt-12 py-5 rounded-[24px] bg-slate-950 text-white font-bold flex items-center justify-center gap-3 hover:bg-slate-900 transition-all shadow-xl">
-                            Deploy this Strategy
-                            <ArrowRight className="w-5 h-5" />
-                        </button>
+                            {/* Output Area */}
+                            <div className="flex-1 bg-[radial-gradient(#e2e8f0_1px,transparent_1px)] [background-size:24px_24px] flex flex-col justify-center p-6">
+                                <AnimatePresence mode="wait">
+                                    {loading ? (
+                                        <motion.div
+                                            key="loading"
+                                            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                                            className="flex flex-col items-center justify-center space-y-6 py-20"
+                                        >
+                                            <div className="relative">
+                                                <div className="absolute inset-0 bg-rose-500 rounded-full blur-xl opacity-20 animate-pulse" />
+                                                <div className="w-16 h-16 bg-white rounded-2xl shadow-xl border border-slate-100 flex items-center justify-center relative z-10">
+                                                    <RefreshCw className="w-8 h-8 text-rose-500 animate-spin" />
+                                                </div>
+                                            </div>
+                                            <div className="text-center">
+                                                <p className="font-black text-slate-900 text-lg tracking-tight mb-1">Architecting Blueprint...</p>
+                                                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Modeling Inflation & Market Returns</p>
+                                            </div>
+                                        </motion.div>
+                                    ) : error ? (
+                                        <motion.div key="error" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-center py-20">
+                                            <p className="text-rose-500 font-black">{error}</p>
+                                        </motion.div>
+                                    ) : result ? (
+                                        <motion.div
+                                            key="result"
+                                            initial={{ opacity: 0, y: 20 }}
+                                            animate={{ opacity: 1, y: 0 }}
+                                            className="bg-white border border-slate-200 rounded-[32px] overflow-hidden shadow-2xl shadow-indigo-900/5"
+                                        >
+                                            {/* Dark Header */}
+                                            <div className="p-10 bg-slate-900 text-white relative overflow-hidden">
+                                                <div className="absolute top-0 right-0 w-64 h-64 bg-rose-500/20 blur-[100px] rounded-full" />
+                                                <div className="absolute bottom-0 left-0 w-48 h-48 bg-orange-500/20 blur-[80px] rounded-full" />
+                                                <div className="relative z-10">
+                                                    <div className="flex justify-between items-start mb-6">
+                                                        <div className="max-w-[55%]">
+                                                            <div className="flex gap-3 mb-4">
+                                                                <span className="px-3 py-1 bg-white/10 backdrop-blur-md border border-white/10 rounded-lg text-[10px] font-black text-rose-300 uppercase tracking-widest">
+                                                                    {result.timeframeYears}Y Horizon
+                                                                </span>
+                                                                <span className="px-3 py-1 bg-white/10 backdrop-blur-md border border-white/10 rounded-lg text-[10px] font-black text-emerald-300 uppercase tracking-widest">
+                                                                    {result.compoundedInflation}
+                                                                </span>
+                                                            </div>
+                                                            <h4 className="font-black text-white text-2xl tracking-tight leading-tight">{result.goalTitle}</h4>
+                                                        </div>
+                                                        {/* Feasibility Score */}
+                                                        <div className="bg-white/5 backdrop-blur-xl px-6 py-5 rounded-2xl border border-white/10 text-center shrink-0">
+                                                            <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Feasibility</p>
+                                                            <p className={`font-black text-3xl ${feasibilityColor(result.feasibilityScore)}`}>{result.feasibilityScore}</p>
+                                                            <p className="text-[9px] text-slate-500 font-black">/100</p>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            {/* Key Metrics Row */}
+                                            <div className="grid grid-cols-3 divide-x divide-slate-100 border-b border-slate-100">
+                                                <div className="p-6 text-center">
+                                                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Current Cost</p>
+                                                    <p className="font-black text-slate-900 text-xl">{formatINR(result.currentValuation)}</p>
+                                                </div>
+                                                <div className="p-6 text-center bg-rose-50">
+                                                    <p className="text-[10px] font-black text-rose-600 uppercase tracking-widest mb-2">Future Value</p>
+                                                    <p className="font-black text-rose-700 text-xl">{formatINR(result.futureValuation)}</p>
+                                                </div>
+                                                <div className="p-6 text-center bg-indigo-50">
+                                                    <p className="text-[10px] font-black text-indigo-600 uppercase tracking-widest mb-2">Monthly SIP</p>
+                                                    <p className="font-black text-indigo-700 text-xl">{formatINR(result.monthlySIP)}</p>
+                                                    <p className="text-[9px] text-slate-400 font-black mt-0.5">@ {result.assumedAnnualReturn}% CAGR</p>
+                                                </div>
+                                            </div>
+
+                                            {/* Allocation Plan */}
+                                            <div className="p-8 border-b border-slate-100">
+                                                <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-6">Portfolio Allocation Blueprint</h5>
+                                                <div className="space-y-4">
+                                                    {result.allocation?.map((alloc, i) => (
+                                                        <div key={i} className="flex items-start gap-4 p-4 rounded-2xl bg-slate-50 border border-slate-100 hover:border-indigo-100 hover:bg-white transition-all group">
+                                                            <div className={`w-12 h-12 rounded-xl flex items-center justify-center font-black text-white text-sm shrink-0 shadow-sm ${allocationColors[alloc.type] || 'bg-slate-700'}`}>
+                                                                {alloc.percentage}%
+                                                            </div>
+                                                            <div className="flex-1 min-w-0">
+                                                                <div className="flex items-center gap-2 mb-1">
+                                                                    <p className="font-black text-slate-900 text-sm">{alloc.type}</p>
+                                                                    <span className={`px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-widest border ${allocationBadgeColors[alloc.type] || 'bg-slate-50 text-slate-500 border-slate-100'}`}>
+                                                                        {alloc.percentage}% Weight
+                                                                    </span>
+                                                                </div>
+                                                                <p className="text-[11px] text-indigo-600 font-black mb-1 truncate">{alloc.assets}</p>
+                                                                <p className="text-[11px] text-slate-500 font-medium leading-snug">{alloc.logic}</p>
+                                                            </div>
+                                                            {/* Weight bar */}
+                                                            <div className="w-16 flex flex-col items-end justify-center gap-1 shrink-0">
+                                                                <div className="w-full bg-slate-100 rounded-full h-1.5">
+                                                                    <div className={`h-1.5 rounded-full ${allocationColors[alloc.type] || 'bg-slate-400'}`} style={{ width: `${alloc.percentage}%` }} />
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
+
+                                            {/* Architect Advisory Note */}
+                                            <div className="p-8">
+                                                <div className="bg-amber-50 border border-amber-100 rounded-2xl p-5 mb-6">
+                                                    <div className="flex items-center gap-2 mb-3">
+                                                        <ShieldCheck className="w-4 h-4 text-amber-600" />
+                                                        <h5 className="text-[10px] font-black text-amber-700 uppercase tracking-widest">Wealth Architect Advisory</h5>
+                                                    </div>
+                                                    <p className="text-sm text-amber-900 font-medium leading-relaxed">{result.architectAdvice}</p>
+                                                </div>
+
+                                                <button
+                                                    onClick={() => handleGenerate(result)}
+                                                    className="w-full py-4 bg-slate-900 text-white rounded-2xl text-[11px] font-black uppercase tracking-[0.2em] hover:bg-rose-600 hover:shadow-xl hover:shadow-rose-900/20 hover:-translate-y-1 transition-all flex items-center justify-center gap-3"
+                                                >
+                                                    <ArrowRight className="w-4 h-4" />
+                                                    Regenerate Blueprint
+                                                </button>
+                                            </div>
+                                        </motion.div>
+                                    ) : (
+                                        <motion.div
+                                            key="empty"
+                                            initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+                                            className="h-full flex flex-col items-center justify-center text-center px-10"
+                                        >
+                                            <div className="w-24 h-24 rounded-full bg-rose-50 flex items-center justify-center mb-8 border border-rose-100">
+                                                <Target className="w-10 h-10 text-rose-300" />
+                                            </div>
+                                            <h3 className="font-black text-slate-900 text-2xl tracking-tight mb-4">Define Your Destination</h3>
+                                            <p className="text-slate-500 font-medium leading-relaxed max-w-sm">
+                                                Describe any financial goal in plain language — buying a home, funding education, or building a retirement corpus — and we'll blueprint the path.
+                                            </p>
+                                        </motion.div>
+                                    )}
+                                </AnimatePresence>
+                            </div>
+                        </motion.div>
                     </div>
                 </div>
             </div>

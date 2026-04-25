@@ -49,6 +49,25 @@ export const getStockPrediction = async (req, res) => {
     const companyName = quote?.longName || symbol;
     const sector = quote?.sector || quote?.industry || null;
 
+    // 1b. Fetch Extended Company Profile & Financials
+    console.log(`Fetching profile & financials for ${symbol}...`);
+    const summaryResult = await yahooFinance.quoteSummary(symbol, { 
+      modules: [
+        'summaryProfile', 
+        'financialData', 
+        'defaultKeyStatistics',
+        'majorHoldersBreakdown'
+      ] 
+    }).catch(err => {
+       console.error("Yahoo Summary Error:", err.message);
+       return null;
+    });
+
+    const profile = summaryResult?.summaryProfile || {};
+    const financials = summaryResult?.financialData || {};
+    const stats = summaryResult?.defaultKeyStatistics || {};
+    const holdings = summaryResult?.majorHoldersBreakdown || {};
+
     // 2. Fetch Historical Data (2 years for better chart zooming)
     const endDate = new Date();
     const startDate = new Date();
@@ -129,6 +148,14 @@ export const getStockPrediction = async (req, res) => {
     // Assemble final structured response
     const finalResult = {
       ...analysis,
+      profile: {
+        description: profile.longBusinessSummary || "Institutional description pending.",
+        sector: profile.sector || "N/A",
+        industry: profile.industry || "N/A",
+        website: profile.website || "N/A",
+        employees: profile.fullTimeEmployees || "N/A",
+        city: profile.city || "N/A"
+      },
       fundamentals: {
         marketCap: quote?.marketCap || 0,
         peRatio: quote?.trailingPE || quote?.forwardPE || 0,
@@ -139,7 +166,24 @@ export const getStockPrediction = async (req, res) => {
         fiftyTwoWeekHigh: quote?.fiftyTwoWeekHigh || 0,
         fiftyTwoWeekLow: quote?.fiftyTwoWeekLow || 0,
         regularMarketVolume: quote?.regularMarketVolume || 0,
-        regularMarketOpen: quote?.regularMarketOpen || 0
+        regularMarketOpen: quote?.regularMarketOpen || 0,
+        roe: financials.returnOnEquity || 0,
+        roa: stats.returnOnAssets || 0,
+        currentRatio: financials.currentRatio || 0,
+        debtToEquity: financials.debtToEquity || 0,
+        revenueGrowth: financials.revenueGrowth || 0,
+        profitMargins: financials.profitMargins || 0,
+        bookValue: stats.bookValue || 0,
+        priceToBook: stats.priceToBook || 0,
+        // New Financials
+        totalRevenue: financials.totalRevenue || 0,
+        netIncome: financials.netIncomeToCommon || 0,
+        ebitda: financials.ebitda || 0,
+        operatingMargins: financials.operatingMargins || 0,
+        // New Holdings
+        insiderHolding: holdings.insidersPercent || 0,
+        institutionsHolding: holdings.institutionsPercent || 0,
+        institutionsCount: holdings.institutionsCount || 0
       }
     };
 

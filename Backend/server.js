@@ -82,9 +82,23 @@ cron.schedule('*/30 * * * *', async () => {
   }
 });
 
-httpServer.listen(PORT, () => {
-  console.log(`Server is listening on port ${PORT} `);
-});
+const startServer = () => {
+  httpServer.listen(PORT, () => {
+    console.log(`Server is listening on port ${PORT} `);
+  }).on('error', (err) => {
+    if (err.code === 'EADDRINUSE') {
+      console.error(`[Server] Port ${PORT} is currently occupied. Retrying in 1.5s...`);
+      setTimeout(() => {
+        httpServer.close();
+        startServer();
+      }, 1500);
+    } else {
+      console.error('[Server] Critical Startup Error:', err);
+    }
+  });
+};
+
+startServer();
 
 // Aggressive unbind handling to ensure reliable Nodemon restarts
 process.once('SIGUSR2', () => {

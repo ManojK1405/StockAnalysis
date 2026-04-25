@@ -219,13 +219,49 @@ export const analyzeStock = (history, sentiment = 0) => {
   if (currentMACD?.MACD > currentMACD?.signal) reasoning.push('MACD trend crossover confirms bullish momentum.');
   if (sentiment > 0.4) reasoning.push('News sentiment is exceptionally positive.');
 
+  // ----- Technical Indicator Suite (Extended for Institutional Reporting) -----
+  const getEMA = (period) => {
+    const vals = EMA.calculate({ period: Math.min(closes.length - 1, period), values: closes }) || [];
+    return vals.length > 0 ? parseFloat(vals[vals.length - 1].toFixed(2)) : 0;
+  };
+  const getSMA = (period) => {
+    const vals = SMA.calculate({ period: Math.min(closes.length - 1, period), values: closes }) || [];
+    return vals.length > 0 ? parseFloat(vals[vals.length - 1].toFixed(2)) : 0;
+  };
+  const getRSI = (period) => {
+    const vals = RSI.calculate({ period: Math.min(closes.length - 1, period), values: closes }) || [];
+    return vals.length > 0 ? parseFloat(vals[vals.length - 1].toFixed(2)) : 0;
+  };
+
+  const emaSuite = {
+    ema5: getEMA(5), ema8: getEMA(8), ema9: getEMA(9), ema13: getEMA(13), 
+    ema21: getEMA(21), ema50: getEMA(50), ema100: getEMA(100), ema200: getEMA(200)
+  };
+  const smaSuite = { sma9: getSMA(9), sma50: getSMA(50), sma100: getSMA(100) };
+  const rsiSuite = { rsi14: getRSI(14), rsi9: getRSI(9), rsi7: getRSI(7) };
+
+  let currentATR = 0;
+  try {
+    const atrValues = TI.ATR.calculate({ high: highs, low: lows, close: closes, period: 14 }) || [];
+    currentATR = atrValues.length > 0 ? parseFloat(atrValues[atrValues.length - 1].toFixed(2)) : 0;
+  } catch (e) { console.error("ATR Error:", e.message); }
+
   // ----- Build the rich trendAnalysis object -----
   const trendAnalysis = {
+    ohlcv: {
+      open: history[history.length - 1].open,
+      high: history[history.length - 1].high,
+      low: history[history.length - 1].low,
+      close: history[history.length - 1].close,
+      volume: history[history.length - 1].volume
+    },
     overall: {
       direction: trend.direction,
       strength: trend.strength,
       description: trendDescription
     },
+    averages: { ...emaSuite, ...smaSuite },
+    oscillators: { ...rsiSuite, atr: currentATR },
     indicators: {
       rsi: {
         value: parseFloat(currentRSI.toFixed(2)),
@@ -280,6 +316,7 @@ export const analyzeStock = (history, sentiment = 0) => {
     symbol: '', 
     signal,
     score,
+    sentiment,
     currentPrice: lastPrice,
     rsi: currentRSI,
     buyLevel: entry, 

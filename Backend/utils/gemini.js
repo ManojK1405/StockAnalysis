@@ -7,10 +7,10 @@ dotenv.config();
 const geminiApiKey = process.env.GEMINI_API_KEY;
 const FALLBACK_GEMINI_MODELS = [
     process.env.GEMINI_MODEL,
+    'models/gemini-3-flash-preview',
     'models/gemini-2.5-flash',
     'models/gemini-2.5-pro',
-    'models/gemini-2.0-flash-lite-001',
-    'models/gemini-2.0-flash-001'
+    'models/gemini-2.0-flash'
 ].filter(Boolean);
 
 const genAI = new GoogleGenerativeAI(geminiApiKey);
@@ -260,8 +260,12 @@ export const getAIPredictionReasoning = async (symbol, indicators, sentiment, tr
             - Use precise numbers (RSI, ATR, % deviations, etc.).
             - No generic statements — every line must add informational edge.
             - Avoid retail clichés (e.g., "strong buy", "good stock").
-            - Write like a hedge fund note: concise, sharp, insight-heavy.
-            - Max 2 sentences per bullet (section 5 can have 3 sub-lines).
+            - Write like a hedge fund note: ultra-concise, sharp, insight-heavy.
+            - MAX 10-12 WORDS per bullet point.
+            - NO HEADERS (###, **). No bold text inside points.
+            - Use telegram-style: "Price below 200 SMA; structural downtrend" instead of "The price is currently trading below its 200-day simple moving average, which indicates a structural downtrend."
+            - Every point MUST be a single line.
+            - Max 1 point per section. Total 5 points.
             - No direct trade recommendations (no entry/exit prices).
         `;
 

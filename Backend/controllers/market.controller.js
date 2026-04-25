@@ -1,11 +1,24 @@
 import YahooFinance from 'yahoo-finance2';
+import { fetchStockNews } from '../utils/news.js';
 
 const yahooFinance = new YahooFinance({ 
     suppressNotices: ['yahooSurvey'],
     validation: { logErrors: false }
 });
 
+// Cache for market summary to reduce API overhead
+let cachedMarketData = null;
+let lastCacheUpdate = 0;
+const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
+
 export const getMarketSummary = async (req, res) => {
+    // Return cached data if valid
+    const now = Date.now();
+    if (cachedMarketData && (now - lastCacheUpdate < CACHE_DURATION)) {
+        console.log('[Market] Serving summary from institutional cache');
+        return res.json(cachedMarketData);
+    }
+
     try {
         const sectors = [
             { name: 'Nifty 50', symbol: '^NSEI' },
@@ -63,18 +76,75 @@ export const getMarketSummary = async (req, res) => {
         let topNews = [];
         try {
             const newsSymbol = trending.length > 0 ? trending[0].symbol : 'RELIANCE.NS';
-            const searchRes = await yahooFinance.search(newsSymbol, { newsCount: 10 }).catch(() => ({ news: [] }));
-            topNews = (searchRes.news || []).slice(0, 5).map(n => ({
+            const newsName = trending.length > 0 ? trending[0].name : 'Reliance Industries';
+            
+            // Use the robust news utility instead of raw search
+            const rawNews = await fetchStockNews(newsSymbol, newsName, 'Market');
+            
+            // Strict filtering for financial relevance
+            const financialKeywords = [
+                'stock', 'market', 'share', 'profit', 'earnings', 'revenue', 'invest', 'finance', 
+                'economic', 'trade', 'nifty', 'sensex', 'fed', 'rbi', 'yield', 'dividend', 
+                'ipo', 'portfolio', 'asset', 'bank', 'capital', 'index', 'nasdaq', 'bull', 'bear'
+            ];
+
+            topNews = rawNews.filter(n => {
+                const text = (n.title + ' ' + (n.description || '')).toLowerCase();
+                return financialKeywords.some(kw => text.includes(kw));
+            }).slice(0, 5).map(n => ({
                 title: n.title,
-                link: n.link,
-                publisher: n.publisher,
-                content: n.providerPublishTime ? new Date(n.providerPublishTime * 1000).toLocaleDateString() : 'Recent'
+                link: n.url,
+                publisher: n.source,
+                content: n.publishedAt ? new Date(n.publishedAt).toLocaleDateString() : 'Recent'
             }));
         } catch (e) {
             console.error('[Market] News failed:', e);
         }
 
-        res.json({ pulse, trending, topNews });
+        let sectorGainers = [];
+        try {
+            const sectorSymbols = [
+                { name: 'Auto', sym: '^CNXAUTO' },
+                { name: 'IT', sym: '^CNXIT' },
+                { name: 'Metals', sym: '^CNXMETAL' },
+                { name: 'Pharma', sym: '^CNXPHARMA' },
+                { name: 'Energy', sym: '^CNXENERGY' },
+                { name: 'FMCG', sym: '^CNXFMCG' }
+            ];
+            const sectorQuotes = await Promise.all(
+                sectorSymbols.map(s => yahooFinance.quote(s.sym).catch(() => null))
+            );
+            sectorGainers = sectorSymbols.map((s, i) => ({
+                name: s.name,
+                changePercent: sectorQuotes[i]?.regularMarketChangePercent || 0
+            })).sort((a, b) => b.changePercent - a.changePercent).slice(0, 3);
+        } catch (e) {
+            console.error('[Market] Sectors failed:', e);
+        }
+
+        let globalIndices = [];
+        try {
+            const globalSymbols = [
+                { name: 'Nasdaq', sym: '^IXIC' },
+                { name: 'S&P 500', sym: '^GSPC' },
+                { name: 'DAX', sym: '^GDAXI' },
+                { name: 'Nikkei', sym: '^N225' },
+                { name: 'FTSE 100', sym: '^FTSE' }
+            ];
+            const globalQuotes = await Promise.all(
+                globalSymbols.map(s => yahooFinance.quote(s.sym).catch(() => null))
+            );
+            globalIndices = globalSymbols.map((s, i) => ({
+                name: s.name,
+                changePercent: globalQuotes[i]?.regularMarketChangePercent || 0
+            })).slice(0, 3);
+        } catch (e) {
+            console.error('[Market] Globals failed:', e);
+        }
+
+        cachedMarketData = { pulse, trending, topNews, sectorGainers, globalIndices };
+        lastCacheUpdate = Date.now();
+        res.json(cachedMarketData);
     } catch (error) {
         console.error('Final Market Summary Error:', error);
         res.status(500).json({ error: 'Failed to fetch market summary', pulse: [], trending: [], topNews: [] });

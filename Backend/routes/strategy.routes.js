@@ -7,7 +7,9 @@ import {
     getSavedStrategies, 
     deleteStrategy, 
     updateStrategy, 
-    chatStrategy 
+    chatStrategy,
+    backtestStrategy,
+    customBacktestStrategy
 } from '../controllers/strategy.controller.js';
 
 import { auth } from '../middlewares/auth.middleware.js';
@@ -16,6 +18,12 @@ const router = express.Router();
 
 // POST /api/strategy/generate
 router.post('/generate', generateStrategy);
+
+// POST /api/strategy/backtest
+router.post('/backtest', backtestStrategy);
+
+// POST /api/strategy/custom-backtest
+router.post('/custom-backtest', customBacktestStrategy);
 
 // POST /api/strategy/chat
 router.post('/chat', chatStrategy);

@@ -191,9 +191,26 @@ export const generateStrategy = async (req, res) => {
     const strategy = JSON.parse(raw);
 
     if (Array.isArray(strategy.allocation)) {
+      // Ensure weights sum to 100%
+      let totalWeight = strategy.allocation.reduce((sum, item) => sum + (Number(item.weight) || 0), 0);
+      
+      // If the AI hallucinated and under-allocated, fill the gap with a Cash Reserve
+      if (totalWeight < 100) {
+          const gap = 100 - totalWeight;
+          strategy.allocation.push({
+              name: 'LIQUIDBEES.NS',
+              displayName: 'Cash Reserve (Auto-Balanced)',
+              type: 'cash',
+              weight: gap,
+              reason: 'System auto-allocated remaining capital to liquid reserves to ensure 100% deployment of mandate.',
+              risk: 'Low'
+          });
+      }
+      
+      // Re-calculate the absolute amounts to ensure precision
       strategy.allocation = strategy.allocation.map(item => ({
         ...item,
-        amount: Math.round((item.weight / 100) * investAmount),
+        amount: Math.round((Number(item.weight) / 100) * investAmount),
       }));
     }
 
@@ -386,7 +403,7 @@ export const generateIntradayPulse = async (req, res) => {
  * Reverse Strategy: Goal-based financial planning with inflation and price-hike projection.
  */
 export const generateReverseStrategy = async (req, res) => {
-  const { goalQuery } = req.body;
+  const { goalQuery, previousResult } = req.body;
   
   if (!goalQuery) {
     return res.status(400).json({ error: 'Goal query is required (e.g., "Buy a Ducati in 6 years").' });
@@ -410,6 +427,22 @@ export const generateReverseStrategy = async (req, res) => {
       .map(d => `${d.symbol}|30d:${d.returnPct}%|Price:₹${d.currentPrice.toFixed(0)}`)
       .join('\n');
 
+    // 3. Build previous-result context block if available
+    const prevContext = previousResult
+      ? `
+      IMPORTANT — Previous Generation Context (Use this to correct errors and improve precision):
+      - Previous Goal Title: "${previousResult.goalTitle}"
+      - Previous Current Valuation: ₹${previousResult.currentValuation}
+      - Previous Future Valuation: ₹${previousResult.futureValuation}
+      - Previous Monthly SIP: ₹${previousResult.monthlySIP}
+      - Previous Feasibility Score: ${previousResult.feasibilityScore}/100
+      - Previous Allocation: ${JSON.stringify(previousResult.allocation)}
+      - Previous Architect Advice: "${previousResult.architectAdvice}"
+      
+      Review the above for any errors (e.g. unrealistic SIP amounts, wrong tickers, illogical valuation jumps) and produce a corrected, more precise output this time.
+      `
+      : '';
+
     const prompt = `
       Persona: Senior Wealth Architect & Inflation Specialist.
       Objective: Blueprint a multi-year acquisition strategy for a specific luxury/life goal.
@@ -417,6 +450,7 @@ export const generateReverseStrategy = async (req, res) => {
       User Intent: "${goalQuery}"
       Current Market Intelligence:
       ${mktContext}
+      ${prevContext}
       
       Structural Requirements:
       1. Identification: Resolve the specific acquisition target and the client's timeline (in years).
@@ -528,17 +562,33 @@ export const chatStrategy = async (req, res) => {
 
   try {
     const userMessage = messages[messages.length - 1].content;
+    
+    // Fetch fresh context to make the bot "Institutional"
+    const [nifty, bankNifty, trending] = await Promise.all([
+      fetchMomentum('^NSEI'),
+      fetchMomentum('^NSEBANK'),
+      getDynamicSymbols('broad market', 5)
+    ]);
+
+    const trendingQuotes = await Promise.all(trending.map(fetchMomentum));
+    const mktContext = [
+      `NIFTY: ${nifty?.returnPct}% | BANKNIFTY: ${bankNifty?.returnPct}%`,
+      ...trendingQuotes.filter(Boolean).map(q => `${q.symbol}: ${q.returnPct}%`)
+    ].join('; ');
+
     const prompt = `
-      Persona: Expert Quant Strategist & Investment Advisor.
-      Context: User is asking about market strategies, stock picks, or financial planning.
+      Persona: Senior Quantitative Architect & CIO.
+      Context: You are advising a high-net-worth client on the Indian stock market (NSE/BSE).
+      Live Market Intelligence: ${mktContext}
+      
       User Message: "${userMessage}"
       
       Requirements:
-      - Provide a professional, data-driven response.
-      - Use specific Indian market examples if applicable.
-      - If they ask for a strategy, explain the logic (e.g., "Golden Crossover", "Mean Reversion").
-      - Be concise but insightful.
-      - Keep a helpful, institutional tone.
+      - Provide an institutional-grade response grounded in the provided live market context.
+      - Use specific tickers (e.g. RELIANCE.NS, TCS.NS) when discussing sectors.
+      - If they ask for a plan, outline a 3-step quantitative approach (e.g., Asset Mix, Entry Logic, Risk Hedge).
+      - Maintain a professional, decisive, yet cautious tone (Standard SEBI/Institutional disclaimer style).
+      - Be concise but data-dense.
     `;
 
     const response = await generateGeminiText(prompt);
@@ -546,5 +596,92 @@ export const chatStrategy = async (req, res) => {
   } catch (error) {
     console.error('[Chat Strategy] Error:', error.message);
     res.status(500).json({ error: 'AI Strategist is temporarily unavailable.' });
+  }
+};
+
+export const backtestStrategy = async (req, res) => {
+  try {
+    const { allocation, horizon, amount } = req.body;
+    
+    if (!allocation || !horizon || !amount) {
+      return res.status(400).json({ error: 'Missing required parameters for backtest.' });
+    }
+
+    const allocString = allocation.map(a => `${a.name} (${a.weight}%)`).join(', ');
+
+    const prompt = `
+      Persona: Senior Quantitative Analyst & Risk Manager.
+      Objective: Run a simulated historical backtest for an Indian stock market portfolio.
+      
+      Portfolio Composition: ${allocString}
+      Initial Investment (T0): ₹${amount}
+      Historical Lookback Period: ${horizon} Years
+      
+      Task:
+      Based on your extensive historical knowledge of these specific stocks over the last ${horizon} years, calculate what this portfolio would be worth TODAY if it had been invested ${horizon} years ago in these exact proportions (assuming no rebalancing).
+      
+      Requirements:
+      1. Provide a realistic "historicalValue" (the final simulated amount in INR). Use integers only.
+      2. Provide the "historicalCAGR" string (e.g. "14.5%").
+      3. Provide a brief 2-3 sentence "analysis" explaining how this portfolio weathered past macro events (e.g. COVID-19, inflation spikes, sector rotations) and assessing its historical drawdown risk.
+      
+      Return ONLY a raw JSON object (no markdown):
+      {
+        "historicalValue": 1200000,
+        "historicalCAGR": "14.5%",
+        "analysis": "..."
+      }
+    `;
+
+    const rawResponse = await getAIStrategy(prompt);
+    const parsed = JSON.parse(rawResponse);
+    res.json(parsed);
+  } catch (error) {
+    console.error('[Backtest Strategy] Error:', error.message);
+    res.status(500).json({ error: 'Failed to simulate historical backtest.' });
+  }
+};
+
+export const customBacktestStrategy = async (req, res) => {
+  try {
+    const { userInput, horizon, amount } = req.body;
+    
+    if (!userInput || !horizon || !amount) {
+      return res.status(400).json({ error: 'Missing required parameters for custom backtest.' });
+    }
+
+    const prompt = `
+      Persona: Senior Quantitative Analyst & Risk Manager.
+      Objective: Run a simulated historical backtest for a user's custom Indian stock market strategy.
+      
+      User Strategy Input: "${userInput}"
+      Initial Investment (T0): ₹${amount}
+      Historical Lookback Period: ${horizon} Years
+      
+      Task:
+      First, deduce the intended portfolio allocation from the user's input (assume NSE/BSE stocks).
+      Then, based on your extensive historical knowledge of these specific stocks over the last ${horizon} years, calculate what this portfolio would be worth TODAY if it had been invested ${horizon} years ago in those proportions.
+      
+      Requirements:
+      1. Provide the "parsedAllocation" as an array of objects: [{ "name": "TICKER.NS", "weight": 50, "displayName": "Company Name" }]. Ensure weights sum to 100.
+      2. Provide a realistic "historicalValue" (the final simulated amount in INR). Use integers only.
+      3. Provide the "historicalCAGR" string (e.g. "14.5%").
+      4. Provide a brief 2-3 sentence "analysis" explaining how this portfolio weathered past macro events and assessing its historical drawdown risk.
+      
+      Return ONLY a raw JSON object (no markdown):
+      {
+        "parsedAllocation": [{"name": "RELIANCE.NS", "weight": 100, "displayName": "Reliance Industries"}],
+        "historicalValue": 1200000,
+        "historicalCAGR": "14.5%",
+        "analysis": "..."
+      }
+    `;
+
+    const rawResponse = await getAIStrategy(prompt);
+    const parsed = JSON.parse(rawResponse);
+    res.json(parsed);
+  } catch (error) {
+    console.error('[Custom Backtest] Error:', error.message);
+    res.status(500).json({ error: 'Failed to run custom strategy backtest.' });
   }
 };
